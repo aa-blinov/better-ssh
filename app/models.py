@@ -20,5 +20,5 @@ class Server(BaseModel):
 
     def display(self) -> str:
         """Return formatted server display string."""
-        auth = "key" if self.key_path else ("pwd" if self.password else "auto")
+        auth = "key" if self.key_path else ("pwd" if self.password else "---")
         return f"{self.name}  [{self.username}@{self.host}:{self.port} | {auth}]"

@@ -29,7 +29,20 @@ def find_default_ssh_key() -> str | None:
     return None
 
 
-app = typer.Typer(help="Better SSH: quick server selection, connection and password management.")
+class OrderCommands(typer.core.TyperGroup):
+    """Custom group to sort commands alphabetically in help."""
+    def list_commands(self, ctx):
+        return sorted(super().list_commands(ctx))
+
+
+app = typer.Typer(
+    help="Better SSH: quick server selection, connection and password management.",
+    cls=OrderCommands,
+    rich_markup_mode="rich",
+    pretty_exceptions_show_locals=False,
+    add_completion=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 console = Console()
 
 
@@ -42,13 +55,14 @@ def _print_servers(servers: list[Server]) -> None:
     table.add_column("Auth", justify="center", no_wrap=True)
 
     for s in servers:
-        auth = "key" if s.key_path else ("pwd" if s.password else "auto")
+        auth = "key" if s.key_path else ("pwd" if s.password else "---")
         table.add_row(s.id[:8], s.name, f"{s.username}@{s.host}:{s.port}", auth)
 
     console.print(table)
 
 
-@app.command("list")
+@app.command("list", help="Show list of servers. Alias: ls")
+@app.command("ls", hidden=True)
 def list_servers() -> None:
     """Show list of servers."""
     servers = storage.load_servers()
@@ -58,7 +72,8 @@ def list_servers() -> None:
     _print_servers(servers)
 
 
-@app.command("add")
+@app.command("add", help="Add a new server. Alias: a")
+@app.command("a", hidden=True)
 def add_server(
     name: str | None = typer.Option(None, prompt=True, help="Server name"),
     host: str | None = typer.Option(None, prompt=True),
@@ -90,13 +105,47 @@ def add_server(
         raise typer.Exit(0)
 
 
-@app.command()
-def remove(query: str = typer.Argument(..., help="ID/name/partial name")):
+@app.command("remove", help="Remove a server. Alias: rm")
+@app.command("rm", hidden=True)
+def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
     """Remove a server."""
-    srv = storage.find_server(query)
-    if not srv:
-        console.print("[red]Server not found[/red]")
-        raise typer.Exit(1)
+    # If no query provided, show interactive selection
+    if query is None:
+        servers = storage.load_servers()
+        if not servers:
+            console.print("[yellow]No servers found.[/yellow]")
+            raise typer.Exit(1)
+
+        choices = [(s.display(), s.id) for s in sorted(servers, key=lambda x: x.name.lower())]
+        try:
+            selected_display = inquirer.select(
+                message="Select server to remove:",
+                choices=[c[0] for c in choices],
+                cycle=True,
+                vi_mode=False,
+                instruction="↑↓ navigate, search by name",
+            ).execute()
+        except KeyboardInterrupt:
+            console.print("\n[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+        # Find selected server
+        srv = None
+        for s in servers:
+            if s.display() == selected_display:
+                srv = s
+                break
+
+        if not srv:
+            console.print("[red]Failed to identify server[/red]")
+            raise typer.Exit(1)
+    else:
+        # Use query to find server
+        srv = storage.find_server(query)
+        if not srv:
+            console.print("[red]Server not found[/red]")
+            raise typer.Exit(1)
+
     try:
         if not typer.confirm(f"Remove '{srv.name}' ({srv.username}@{srv.host}:{srv.port})?"):
             raise typer.Exit(1)
@@ -110,7 +159,8 @@ def remove(query: str = typer.Argument(..., help="ID/name/partial name")):
         raise typer.Exit(0)
 
 
-@app.command()
+@app.command("edit", help="Edit a server. Alias: e")
+@app.command("e", hidden=True)
 def edit(query: str = typer.Argument(..., help="ID/name/partial name")):
     """Edit a server."""
     srv = storage.find_server(query)
@@ -149,7 +199,8 @@ def edit(query: str = typer.Argument(..., help="ID/name/partial name")):
         raise typer.Exit(0)
 
 
-@app.command("connect")
+@app.command("connect", help="Connect to a server. Alias: c")
+@app.command("c", hidden=True)
 def connect_cmd(
     query: str | None = typer.Argument(None, help="ID/name/partial name (optional)"),
     no_copy: bool = typer.Option(False, help="Don't copy password"),
@@ -196,107 +247,95 @@ def connect_cmd(
     raise typer.Exit(rc)
 
 
-@app.command("copy-pass")
-def copy_pass(query: str = typer.Argument(..., help="ID/name/partial name")):
+@app.command("copy-pass", help="Copy password to clipboard. Alias: cp")
+@app.command("cp", hidden=True)
+def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
     """Copy password to clipboard."""
-    srv = storage.find_server(query)
-    if not srv or not srv.password:
-        console.print("[red]Server not found or has no password[/red]")
-        raise typer.Exit(1)
-    pyperclip.copy(srv.password)
-    console.print("[green]Password copied.[/green]")
-
-
-@app.command("show-pass")
-def show_pass(
-    query: str = typer.Argument(..., help="ID/name/partial name"),
-    plain: bool = typer.Option(False, help="Show in plaintext"),
-):
-    """Show password."""
-    srv = storage.find_server(query)
-    if not srv or not srv.password:
-        console.print("[red]Server not found or has no password[/red]")
-        raise typer.Exit(1)
-    if plain:
-        console.print(f"[bold]{srv.password}[/bold]")
-    else:
-        masked = "*" * max(4, len(srv.password) - 2)
-        console.print(f"[bold]{srv.password[:1]}{masked}{srv.password[-1:]}[/bold]")
-
-
-@app.command("run")
-def run_menu():
-    """Interactive server selection menu."""
-    while True:
+    # If no query provided, show interactive selection
+    if query is None:
         servers = storage.load_servers()
-        if not servers:
-            console.print("[yellow]No servers found. Add one?[/yellow]")
-            try:
-                if not typer.confirm("Add a server now?"):
-                    break
-                # Interactive add right here
-                name = typer.prompt("Name")
-                host = typer.prompt("Host")
-                port = typer.prompt("Port", default="22")
-                username = typer.prompt("Username")
+        servers_with_pwd = [s for s in servers if s.password]
+        if not servers_with_pwd:
+            console.print("[yellow]No servers with saved passwords.[/yellow]")
+            raise typer.Exit(1)
 
-                with_password = typer.confirm("Save password?", default=True)
-                password = None
-                if with_password:
-                    password = typer.prompt("Password (not encrypted)", hide_input=True, confirmation_prompt=True)
-
-                use_key = typer.confirm("Use private key?", default=False)
-                key_path = None
-                if use_key:
-                    default_key = find_default_ssh_key()
-                    if default_key:
-                        key_path = typer.prompt("Key path", default=default_key)
-                    else:
-                        key_path = typer.prompt("Key path (e.g. ~/.ssh/id_rsa)")
-
-                server = Server(
-                    name=name, host=host, port=int(port), username=username, password=password, key_path=key_path
-                )
-                storage.upsert_server(server)
-                console.print(f"[green]Added:[/green] {server.display()}")
-                continue
-            except (KeyboardInterrupt, typer.Abort):
-                console.print("\n[dim]Cancelled.[/dim]")
-                break
-
-        choices = [(s.display(), s.id) for s in sorted(servers, key=lambda x: x.name.lower())]
+        choices = [(s.display(), s.id) for s in sorted(servers_with_pwd, key=lambda x: x.name.lower())]
         try:
-            selected_id = inquirer.select(
-                message="Select server (Enter to connect, Ctrl+C to exit):",
+            selected_display = inquirer.select(
+                message="Select server to copy password:",
                 choices=[c[0] for c in choices],
                 cycle=True,
                 vi_mode=False,
                 instruction="↑↓ navigate, search by name",
             ).execute()
         except KeyboardInterrupt:
-            # Ctrl+C или Esc
-            console.print("\n[dim]Exiting...[/dim]")
-            break
-        except Exception:
-            # Handle other exceptions during exit
-            console.print("\n[dim]Exiting...[/dim]")
-            break
+            console.print("\n[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
 
-        picked: Server | None = None
-        for s in servers:
-            if s.display() == selected_id:
-                picked = s
+        # Find selected server
+        srv = None
+        for s in servers_with_pwd:
+            if s.display() == selected_display:
+                srv = s
                 break
 
-        if not picked:
+        if not srv:
             console.print("[red]Failed to identify server[/red]")
-            continue
+            raise typer.Exit(1)
+    else:
+        # Use query to find server
+        srv = storage.find_server(query)
+        if not srv or not srv.password:
+            console.print("[red]Server not found or has no password[/red]")
+            raise typer.Exit(1)
 
-        console.rule(f"[bold]Connecting to {picked.name}")
-        rc = connect(picked, copy_password=True)
-        if rc != 0:
-            console.print(f"[yellow]ssh exited with code {rc}[/yellow]")
-        console.rule("[dim]Back to menu")
+    pyperclip.copy(srv.password)
+    console.print("[green]Password copied.[/green]")
+
+
+@app.command("show-pass", help="Show password. Alias: sp")
+@app.command("sp", hidden=True)
+def show_pass(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+    """Show password."""
+    # If no query provided, show interactive selection
+    if query is None:
+        servers = storage.load_servers()
+        servers_with_pwd = [s for s in servers if s.password]
+        if not servers_with_pwd:
+            console.print("[yellow]No servers with saved passwords.[/yellow]")
+            raise typer.Exit(1)
+
+        choices = [(s.display(), s.id) for s in sorted(servers_with_pwd, key=lambda x: x.name.lower())]
+        try:
+            selected_display = inquirer.select(
+                message="Select server to show password:",
+                choices=[c[0] for c in choices],
+                cycle=True,
+                vi_mode=False,
+                instruction="↑↓ navigate, search by name",
+            ).execute()
+        except KeyboardInterrupt:
+            console.print("\n[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+        # Find selected server
+        srv = None
+        for s in servers_with_pwd:
+            if s.display() == selected_display:
+                srv = s
+                break
+
+        if not srv:
+            console.print("[red]Failed to identify server[/red]")
+            raise typer.Exit(1)
+    else:
+        # Use query to find server
+        srv = storage.find_server(query)
+        if not srv or not srv.password:
+            console.print("[red]Server not found or has no password[/red]")
+            raise typer.Exit(1)
+
+    console.print(f"[bold]{srv.password}[/bold]")
 
 
 @app.command("encrypt")
