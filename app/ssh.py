@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import platform
 import shutil
+import socket
 import subprocess
+import time
 
 import pyperclip
 from rich.console import Console
@@ -60,3 +62,32 @@ def connect(server: Server, copy_password: bool = True) -> int:
     except Exception as e:
         console.print(f"[red]SSH execution error: {e}[/red]")
         return 1
+
+
+def check_server_availability(server: Server, timeout: float = 3.0) -> tuple[bool, str, float]:
+    """
+    Check if server is reachable on SSH port.
+    Returns (is_available, message, response_time_ms).
+    """
+    start_time = time.perf_counter()
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((server.host, server.port))
+        sock.close()
+
+        elapsed = (time.perf_counter() - start_time) * 1000  # convert to ms
+
+        if result == 0:
+            return True, "reachable", elapsed
+        return False, "port closed", elapsed
+    except socket.gaierror:
+        elapsed = (time.perf_counter() - start_time) * 1000
+        return False, "DNS error", elapsed
+    except TimeoutError:
+        elapsed = (time.perf_counter() - start_time) * 1000
+        return False, "timeout", elapsed
+    except Exception as e:
+        elapsed = (time.perf_counter() - start_time) * 1000
+        return False, f"error: {e}", elapsed

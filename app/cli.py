@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import json
 from pathlib import Path
 
 import pyperclip
@@ -10,9 +12,9 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import storage
-from .encryption import find_ssh_key_for_encryption
+from .encryption import encrypt_password, find_ssh_key_for_encryption
 from .models import Server
-from .ssh import connect
+from .ssh import check_server_availability, connect
 
 
 def find_default_ssh_key() -> str | None:
@@ -338,6 +340,98 @@ def show_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
     console.print(f"[bold]{srv.password}[/bold]")
 
 
+@app.command("ping", help="Check server availability. Alias: p")
+@app.command("p", hidden=True)
+def ping_server(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+    """Check if server is reachable on SSH port."""
+    # If no query provided, show interactive selection
+    if query is None:
+        servers = storage.load_servers()
+        if not servers:
+            console.print("[yellow]No servers found.[/yellow]")
+            raise typer.Exit(1)
+
+        choices = [(s.display(), s.id) for s in sorted(servers, key=lambda x: x.name.lower())]
+        try:
+            selected_display = inquirer.select(
+                message="Select server to ping:",
+                choices=[c[0] for c in choices],
+                cycle=True,
+                vi_mode=False,
+                instruction="↑↓ navigate, search by name",
+            ).execute()
+        except KeyboardInterrupt:
+            console.print("\n[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+        # Find selected server
+        srv = None
+        for s in servers:
+            if s.display() == selected_display:
+                srv = s
+                break
+
+        if not srv:
+            console.print("[red]Failed to identify server[/red]")
+            raise typer.Exit(1)
+    else:
+        # Use query to find server
+        srv = storage.find_server(query)
+        if not srv:
+            console.print("[red]Server not found[/red]")
+            raise typer.Exit(1)
+
+    console.print(f"Checking [bold]{srv.name}[/bold] ({srv.host}:{srv.port})...")
+    is_available, message, response_time = check_server_availability(srv)
+
+    connection = f"{srv.username}@{srv.host}:{srv.port}"
+    if is_available:
+        console.print(f"{connection} - [green]{message}[/green] [dim]({response_time:.0f}ms)[/dim]")
+    else:
+        console.print(f"{connection} - [red]{message}[/red] [dim]({response_time:.0f}ms)[/dim]")
+        raise typer.Exit(1)
+
+
+@app.command("health", help="Check all servers availability. Alias: h")
+@app.command("h", hidden=True)
+def health_check():
+    """Check availability of all servers."""
+    servers = storage.load_servers()
+    if not servers:
+        console.print("[yellow]No servers found.[/yellow]")
+        raise typer.Exit(1)
+
+    console.print(f"Checking {len(servers)} server(s)...\n")
+
+    # Create results table
+    table = Table(title="Server Health Check")
+    table.add_column("Name", style="bold")
+    table.add_column("Connection")
+    table.add_column("Status")
+
+    available_count = 0
+    for srv in sorted(servers, key=lambda x: x.name.lower()):
+        is_available, message, response_time = check_server_availability(srv, timeout=5.0)
+
+        if is_available:
+            available_count += 1
+            status_style = "green"
+        else:
+            status_style = "red"
+
+        table.add_row(
+            srv.name,
+            f"{srv.username}@{srv.host}:{srv.port}",
+            f"[{status_style}]{message}[/{status_style}] [dim]({response_time:.0f}ms)[/dim]",
+        )
+
+    console.print(table)
+    console.print(f"\n[bold]Summary:[/bold] {available_count}/{len(servers)} servers available")
+
+    if available_count < len(servers):
+        raise typer.Exit(1)
+
+
 @app.command("encrypt")
 def enable_encryption():
     """Enable password encryption (SSH key based)."""
@@ -479,6 +573,190 @@ To enable encryption use: [cyan]better-ssh encrypt[/cyan]
             status += "\n[yellow]SSH key not found. Create one: ssh-keygen -t ed25519[/yellow]"
 
         console.print(Panel(status, title="⚠️  Encryption Status", border_style="yellow"))
+
+
+@app.command("export", help="Export servers to JSON file. Alias: ex")
+@app.command("ex", hidden=True)
+def export_servers(
+    output: str = typer.Argument(..., help="Output file path (e.g., backup.json)"),
+):
+    """Export servers configuration to JSON file."""
+    servers = storage.load_servers()
+
+    if not servers:
+        console.print("[yellow]No servers to export.[/yellow]")
+        raise typer.Exit(1)
+
+    # Check if any server has password
+    servers_with_passwords = [s for s in servers if s.password]
+    export_plaintext = False
+
+    # Ask about password format if encryption is enabled and there are passwords
+    if storage.is_encryption_enabled() and servers_with_passwords:
+        console.print(f"\n[bold]Found {len(servers_with_passwords)} server(s) with passwords.[/bold]")
+
+        try:
+            password_mode = inquirer.select(
+                message="Select password export mode:",
+                choices=[
+                    "Plaintext - passwords in readable format (for migration to other machines)",
+                    "Encrypted - keep passwords encrypted (only works on this machine)",
+                ],
+                cycle=True,
+                vi_mode=False,
+            ).execute()
+        except KeyboardInterrupt:
+            console.print("\n[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+        export_plaintext = "Plaintext" in password_mode
+
+        if export_plaintext:
+            console.print("\n[cyan]Plaintext mode:[/cyan] Passwords will be readable in export file.")
+        else:
+            console.print(
+                "\n[yellow]Encrypted mode:[/yellow] Passwords can only be decrypted "
+                "on this machine with the same SSH key."
+            )
+        console.print()
+
+    output_path = Path(output)
+
+    # Check if file exists
+    if output_path.exists():
+        try:
+            if not typer.confirm(f"File '{output}' already exists. Overwrite?", default=False):
+                console.print("[dim]Cancelled.[/dim]")
+                raise typer.Exit(0)
+        except (KeyboardInterrupt, typer.Abort):
+            console.print("\n[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+    # Prepare servers for export
+    # Note: servers are already decrypted by load_servers()
+    # If we want encrypted export, we need to re-encrypt them
+    servers_to_export = servers
+    if not export_plaintext and storage.is_encryption_enabled():
+        # Re-encrypt passwords for export
+        servers_to_export = []
+        for srv in servers:
+            srv_copy = srv.model_copy(deep=True)
+            if srv_copy.password:
+                with contextlib.suppress(Exception):
+                    srv_copy.password = encrypt_password(srv_copy.password)
+            servers_to_export.append(srv_copy)
+
+    # Prepare export data
+    export_data = {
+        "version": 1,
+        "exported_from": "better-ssh",
+        "encryption_enabled": storage.is_encryption_enabled(),
+        "passwords_encrypted": not export_plaintext and storage.is_encryption_enabled(),
+        "servers": [s.model_dump() for s in servers_to_export],
+    }
+
+    # Write to file
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(export_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        console.print(f"[green]✓ Exported {len(servers)} server(s) to:[/green] {output_path.absolute()}")
+    except Exception as e:
+        console.print(f"[red]Export failed: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command("import", help="Import servers from JSON file. Alias: im")
+@app.command("im", hidden=True)
+def import_servers(
+    input_file: str = typer.Argument(..., help="Input file path (e.g., backup.json)"),
+):
+    """Import servers configuration from JSON file."""
+    input_path = Path(input_file)
+
+    if not input_path.exists():
+        console.print(f"[red]File not found:[/red] {input_path}")
+        raise typer.Exit(1)
+
+    # Read import file
+    try:
+        import_data = json.loads(input_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        console.print(f"[red]Failed to read file: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Validate format
+    if "servers" not in import_data:
+        console.print("[red]Invalid file format: missing 'servers' field.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        imported_servers = [Server.model_validate(srv_data) for srv_data in import_data["servers"]]
+    except Exception as e:
+        console.print(f"[red]Invalid server data: {e}[/red]")
+        raise typer.Exit(1)
+
+    if not imported_servers:
+        console.print("[yellow]No servers found in import file.[/yellow]")
+        raise typer.Exit(1)
+
+    # Show what will be imported
+    console.print(f"\n[bold]Found {len(imported_servers)} server(s) to import:[/bold]")
+    for srv in imported_servers:
+        auth = "key" if srv.key_path else ("pwd" if srv.password else "---")
+        console.print(f"  • {srv.name} ({srv.username}@{srv.host}:{srv.port}) [{auth}]")
+
+    # Ask for import mode if there are existing servers
+    existing_servers = storage.load_servers()
+    merge_mode = False
+
+    if existing_servers:
+        console.print(f"\n[yellow]You have {len(existing_servers)} existing server(s).[/yellow]")
+
+        try:
+            mode_choice = inquirer.select(
+                message="Select import mode:",
+                choices=[
+                    "Replace all - delete existing servers and import new ones",
+                    "Merge - keep existing servers and add/update from import",
+                ],
+                cycle=True,
+                vi_mode=False,
+            ).execute()
+        except KeyboardInterrupt:
+            console.print("\n[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+        merge_mode = "Merge" in mode_choice
+
+        if merge_mode:
+            console.print("\n[cyan]Merge mode:[/cyan] Existing servers will be kept.")
+            console.print("Servers with same ID will be updated.\n")
+        else:
+            console.print("\n[red]Replace mode:[/red] All existing servers will be deleted!\n")
+
+    # Final confirmation
+    try:
+        if not typer.confirm("Continue with import?", default=False):
+            console.print("[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+    except (KeyboardInterrupt, typer.Abort):
+        console.print("\n[dim]Cancelled.[/dim]")
+        raise typer.Exit(0)
+
+    # Perform import
+    if merge_mode:
+        # Merge: update existing or add new
+        existing_by_id = {s.id: s for s in existing_servers}
+        for srv in imported_servers:
+            existing_by_id[srv.id] = srv
+        final_servers = list(existing_by_id.values())
+    else:
+        # Replace: use only imported
+        final_servers = imported_servers
+
+    storage.save_servers(final_servers)
+    console.print(f"[green]✓ Successfully imported {len(imported_servers)} server(s)![/green]")
+    console.print(f"Total servers: {len(final_servers)}")
 
 
 def main():
