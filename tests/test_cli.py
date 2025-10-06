@@ -142,7 +142,7 @@ def test_no_duplicate_aliases_in_help(runner: CliRunner):
     # Check that we show aliases in command descriptions (like "Alias: ls")
     # but don't have separate duplicate command entries
     # Count main commands - should be 14 unique commands
-    lines = result.stdout.split('\n')
-    command_lines = [line for line in lines if 'Alias:' in line]
+    lines = result.stdout.split("\n")
+    command_lines = [line for line in lines if "Alias:" in line]
     # Should have at least some commands with aliases
     assert len(command_lines) >= 8

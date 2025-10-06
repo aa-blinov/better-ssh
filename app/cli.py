@@ -33,6 +33,7 @@ def find_default_ssh_key() -> str | None:
 
 class OrderCommands(typer.core.TyperGroup):
     """Custom group to sort commands alphabetically in help."""
+
     def list_commands(self, ctx):
         return sorted(super().list_commands(ctx))
 
