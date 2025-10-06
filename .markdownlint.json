@@ -1,0 +1,11 @@
+{
+    "default": true,
+    "MD013": false,
+    "MD033": false,
+    "MD041": false,
+    "MD022": {
+        "lines_above": 1,
+        "lines_below": 1
+    },
+    "MD032": false
+}

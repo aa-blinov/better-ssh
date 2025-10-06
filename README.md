@@ -1,5 +1,10 @@
 # better-ssh
 
+[![Tests](https://github.com/aa-blinov/better-ssh/actions/workflows/tests.yml/badge.svg)](https://github.com/aa-blinov/better-ssh/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/aa-blinov/better-ssh/branch/master/graph/badge.svg)](https://codecov.io/gh/aa-blinov/better-ssh)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A command-line tool for managing SSH connections with an interactive interface, password management, and optional encryption.
 
 ## Table of Contents
@@ -25,7 +30,10 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Automatic password clipboard integration
 - Support for SSH private key authentication
 - Server management (add, edit, remove, list)
+- Server availability checking (ping individual or health check all)
+- Configuration backup and restore (export/import)
 - Cross-platform compatibility (Windows, macOS, Linux)
+- Short command aliases for faster workflow
 - Flexible server identification (by name, partial name, or ID)
 - Auto-detection of SSH keys in standard locations
 
@@ -95,57 +103,37 @@ sudo pacman -S openssh
 
 ## Usage
 
-### Basic Commands
+### Available Commands
 
-**Interactive menu:**
+```text
+Usage: better-ssh [OPTIONS] COMMAND [ARGS]...
 
-```bash
-uv run better-ssh run
+Better SSH: quick server selection, connection and password management.
+
+Commands:
+  add                 Add a new server. Alias: a
+  connect             Connect to a server. Alias: c
+  copy-pass           Copy password to clipboard. Alias: cp
+  decrypt             Disable password encryption (decrypt all passwords).
+  edit                Edit a server. Alias: e
+  encrypt             Enable password encryption (SSH key based).
+  encryption-status   Show encryption status.
+  export              Export servers to JSON file. Alias: ex
+  health              Check all servers availability. Alias: h
+  import              Import servers from JSON file. Alias: im
+  list                Show list of servers. Alias: ls
+  ping                Check server availability. Alias: p
+  remove              Remove a server. Alias: rm
+  show-pass           Show password. Alias: sp
 ```
 
-**Connect to a server:**
+Most commands work without arguments and will present an interactive menu.
+
+For detailed help on any command, use `--help`:
 
 ```bash
-# With interactive selection
-uv run better-ssh connect
-
-# Direct connection by name
-uv run better-ssh connect <server-name>
-```
-
-**Manage servers:**
-
-```bash
-# List all servers
-uv run better-ssh list
-
-# Add a new server (interactive)
-uv run better-ssh add
-
-# Add with password
-uv run better-ssh add --password
-
-# Add with SSH key
-uv run better-ssh add --key
-
-# Edit a server
-uv run better-ssh edit <server-name>
-
-# Remove a server
-uv run better-ssh remove <server-name>
-```
-
-**Password management:**
-
-```bash
-# Copy password to clipboard
-uv run better-ssh copy-pass <server-name>
-
-# Show password (masked)
-uv run better-ssh show-pass <server-name>
-
-# Show password (plaintext)
-uv run better-ssh show-pass <server-name> --plain
+uv run better-ssh connect --help
+uv run better-ssh add --help
 ```
 
 ### Server Identification
@@ -211,18 +199,20 @@ sudo pacman -S openssh
 
 By default, passwords are stored in plaintext. The application offers optional encryption using your SSH private key as the encryption key source.
 
-### Enabling Encryption
+### Managing Encryption
 
 ```bash
 # Check encryption status
 uv run better-ssh encryption-status
 
-# Enable encryption
+# Enable encryption (interactive)
 uv run better-ssh encrypt
 
-# Disable encryption
+# Disable encryption (interactive)
 uv run better-ssh decrypt
 ```
+
+When exporting servers, you can choose to export passwords in plaintext or encrypted format through an interactive prompt.
 
 ### How It Works
 
@@ -294,21 +284,52 @@ Contributions are welcome. Please follow these guidelines:
 - Format code: `uv run ruff format app`
 - Ensure all checks pass before submitting
 
-### Submitting Changes
-
-1. Commit your changes with clear, descriptive messages
-2. Push to your fork
-3. Submit a pull request with a description of your changes
-4. Ensure all CI checks pass
-
 ### Testing
+
+The project includes comprehensive test coverage using pytest:
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run with verbose output
+uv run pytest -v
+
+# Run specific test file
+uv run pytest tests/test_models.py
+
+# Run with coverage report
+uv run pytest --cov=app --cov-report=html
+
+# View HTML coverage report
+# Open htmlcov/index.html in browser
+```
+
+**Test Structure:**
+
+- `tests/test_models.py` - Server model tests
+- `tests/test_encryption.py` - Encryption/decryption tests
+- `tests/test_storage.py` - Configuration persistence tests
+- `tests/test_cli.py` - CLI commands and interface tests
 
 When adding new features:
 
+- Write tests for new functionality
+- Maintain test coverage above 80%
 - Test on multiple platforms if possible
 - Verify SSH client compatibility
 - Test encryption/decryption functionality
 - Check interactive menu behavior
+
+### Submitting Changes
+
+1. Ensure all tests pass: `uv run pytest`
+2. Run linting: `uv run ruff check app tests`
+3. Format code: `uv run ruff format app tests`
+4. Commit your changes with clear, descriptive messages
+5. Push to your fork
+6. Submit a pull request with a description of your changes
+7. Ensure all CI checks pass
 
 ## License
 

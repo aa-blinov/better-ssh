@@ -23,7 +23,7 @@ def find_default_ssh_key() -> str | None:
     if not ssh_dir.exists():
         return None
 
-    # Приоритет: ed25519 > rsa > ecdsa > dsa
+    # Priority: ed25519 > rsa > ecdsa > dsa
     for key_name in ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"]:
         key_path = ssh_dir / key_name
         if key_path.exists():

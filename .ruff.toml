@@ -62,6 +62,14 @@ select = [
 ]
 unfixable = []
 
+[lint.per-file-ignores]
+"tests/**/*.py" = [
+  "S101",  # Allow assert in tests
+  "S105",  # Allow hardcoded passwords in tests
+  "S106",  # Allow hardcoded passwords in tests
+  "PT011", # Allow generic pytest.raises
+]
+
 [format]
 docstring-code-format = true
 docstring-code-line-length = 120
