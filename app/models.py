@@ -15,10 +15,22 @@ class Server(BaseModel):
     username: str
     password: str | None = None
     key_path: str | None = None
+    certificate_path: str | None = None
+    favorite: bool = False
+    use_count: int = 0
+    last_used_at: str | None = None
     tags: list[str] = Field(default_factory=list)
     notes: str | None = None
 
     def display(self) -> str:
         """Return formatted server display string."""
-        auth = "key" if self.key_path else ("pwd" if self.password else "---")
-        return f"{self.name}  [{self.username}@{self.host}:{self.port} | {auth}]"
+        if self.certificate_path:
+            auth = "cert"
+        elif self.key_path:
+            auth = "key"
+        elif self.password:
+            auth = "pwd"
+        else:
+            auth = "auto"
+        prefix = "[pin] " if self.favorite else ""
+        return f"{prefix}{self.name}  [{self.username}@{self.host}:{self.port} | {auth}]"

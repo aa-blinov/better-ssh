@@ -26,9 +26,12 @@ better-ssh simplifies SSH connection management by providing an interactive term
 ## Features
 
 - Interactive server selection menu with search capabilities
+- Pinned favorites that stay above recent history
+- Interactive menus prioritize recently used servers automatically
+- Import existing hosts from `~/.ssh/config`
 - Password storage with optional SSH key-based encryption
 - Automatic password clipboard integration
-- Support for SSH private key authentication
+- Support for SSH private key and certificate authentication
 - Server management (add, edit, remove, list)
 - Server availability checking (ping individual or health check all)
 - Configuration backup and restore (export/import)
@@ -57,12 +60,19 @@ cd better-ssh
 2. Install dependencies:
 
 ```bash
-uv sync
+uv tool install -e .
 ```
 
 3. Verify installation:
 
 ```bash
+better-ssh --help
+```
+
+For development instead of a global install:
+
+```bash
+uv sync
 uv run better-ssh --help
 ```
 
@@ -74,10 +84,24 @@ The tool requires a system SSH client. Installation instructions vary by platfor
 
 ```powershell
 # Via Windows Settings
-Settings → Apps → Optional Features → OpenSSH Client
+Settings -> Apps -> Optional Features -> OpenSSH Client
 
 # Via winget
 winget install --id Microsoft.OpenSSH.Client -e
+```
+
+### Shell Completion
+
+Install shell completion for your current shell:
+
+```bash
+better-ssh --install-completion
+```
+
+Preview the completion script without installing it:
+
+```bash
+better-ssh --show-completion
 ```
 
 **macOS:**
@@ -103,6 +127,18 @@ sudo pacman -S openssh
 
 ## Usage
 
+### Quick Start
+
+```bash
+better-ssh
+better-ssh <query>
+better-ssh import-ssh-config
+```
+
+- `better-ssh` opens the interactive connect menu immediately
+- `better-ssh <query>` connects directly when the match is unique
+- `better-ssh import-ssh-config` bootstraps your saved hosts from `~/.ssh/config`
+
 ### Available Commands
 
 ```text
@@ -121,20 +157,47 @@ Commands:
   export              Export servers to JSON file. Alias: ex
   health              Check all servers availability. Alias: h
   import              Import servers from JSON file. Alias: im
+  import-ssh-config   Import hosts from SSH config. Alias: isc
   list                Show list of servers. Alias: ls
+  pin                 Pin a server to the top of lists.
   ping                Check server availability. Alias: p
   remove              Remove a server. Alias: rm
   show-pass           Show password. Alias: sp
+  unpin               Remove a server from pinned favorites.
 ```
+
+Run `better-ssh` without a subcommand to open the interactive connect menu immediately.
+
+Run `better-ssh <query>` to connect directly when the match is unique. If the query is ambiguous or missing, the tool falls back to an interactive menu.
+
+Use `better-ssh pin <query>` to keep critical hosts above the normal recent/frequent ordering, and `better-ssh unpin <query>` to remove them from favorites.
 
 Most commands work without arguments and will present an interactive menu.
 
 For detailed help on any command, use `--help`:
 
 ```bash
-uv run better-ssh connect --help
-uv run better-ssh add --help
+better-ssh connect --help
+better-ssh add --help
 ```
+
+### Importing From SSH Config
+
+Import hosts from your OpenSSH config:
+
+```bash
+better-ssh import-ssh-config
+```
+
+Or import from a custom path:
+
+```bash
+better-ssh import-ssh-config ~/.ssh/work-config
+```
+
+The importer resolves each host through `ssh -G`, so `Host *`, `Include`, explicit `IdentityFile`, and explicit `CertificateFile` are reflected in imported entries.
+
+Default OpenSSH keys remain implicit. If a host works with plain `ssh host` because of default keys or `ssh-agent`, `better-ssh` will keep using that behavior without pinning a key path unless your SSH config explicitly does so.
 
 ### Server Identification
 
@@ -142,7 +205,7 @@ Servers can be identified by:
 
 - Full name (case-insensitive)
 - Partial name match
-- Server ID (first 8 characters shown in list)
+- Server ID prefix
 
 ## Configuration
 
@@ -168,7 +231,7 @@ Configuration files are stored in platform-specific directories:
 
 ```powershell
 # Via Windows Features
-Settings → Apps → Optional Features → OpenSSH Client
+Settings -> Apps -> Optional Features -> OpenSSH Client
 
 # Or via winget
 winget install --id Microsoft.OpenSSH.Client -e

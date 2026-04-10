@@ -27,17 +27,17 @@ def connect(server: Server, copy_password: bool = True) -> int:
         if system == "Windows":
             console.print(
                 "Install OpenSSH Client:\n"
-                "  • Via Windows Features: Settings → Apps → Optional Features → OpenSSH Client\n"
-                "  • Via winget: [cyan]winget install --id Microsoft.OpenSSH.Client -e[/cyan]"
+                "  - Via Windows Features: Settings -> Apps -> Optional Features -> OpenSSH Client\n"
+                "  - Via winget: [cyan]winget install --id Microsoft.OpenSSH.Client -e[/cyan]"
             )
         elif system == "Darwin":
             console.print("SSH client should be installed by default on macOS.\nTry: [cyan]brew install openssh[/cyan]")
         else:  # Linux and others
             console.print(
                 "Install SSH client via package manager:\n"
-                "  • Ubuntu/Debian: [cyan]sudo apt install openssh-client[/cyan]\n"
-                "  • Fedora/RHEL: [cyan]sudo dnf install openssh-clients[/cyan]\n"
-                "  • Arch: [cyan]sudo pacman -S openssh[/cyan]"
+                "  - Ubuntu/Debian: [cyan]sudo apt install openssh-client[/cyan]\n"
+                "  - Fedora/RHEL: [cyan]sudo dnf install openssh-clients[/cyan]\n"
+                "  - Arch: [cyan]sudo pacman -S openssh[/cyan]"
             )
         return 127
 
@@ -52,6 +52,8 @@ def connect(server: Server, copy_password: bool = True) -> int:
     cmd = ["ssh", "-p", str(server.port)]
     if server.key_path:
         cmd += ["-i", server.key_path]
+    if server.certificate_path:
+        cmd += ["-o", f"CertificateFile={server.certificate_path}"]
     cmd += [f"{server.username}@{server.host}"]
 
     console.print(f"[cyan]SSH: {' '.join(cmd)}[/cyan]")

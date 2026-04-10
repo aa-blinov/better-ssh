@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import contextlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
+import click
 import pyperclip
 import typer
 from InquirerPy import inquirer
@@ -15,6 +17,7 @@ from . import storage
 from .encryption import encrypt_password, find_ssh_key_for_encryption
 from .models import Server
 from .ssh import check_server_availability, connect
+from .ssh_config import get_default_ssh_config_path, import_ssh_config
 
 
 def find_default_ssh_key() -> str | None:
@@ -37,31 +40,153 @@ class OrderCommands(typer.core.TyperGroup):
     def list_commands(self, ctx):
         return sorted(super().list_commands(ctx))
 
+    def resolve_command(self, ctx, args):
+        """Treat unknown positional input as a shorthand connect query."""
+        if args:
+            command = self.get_command(ctx, args[0])
+            if command is None and not args[0].startswith("-"):
+                connect_command = self.get_command(ctx, "connect")
+                if connect_command is not None:
+                    return "connect", connect_command, args
+        return click.core.Group.resolve_command(self, ctx, args)
+
 
 app = typer.Typer(
     help="Better SSH: quick server selection, connection and password management.",
+    epilog=(
+        "Quick start: better-ssh; better-ssh <query>; better-ssh import-ssh-config"
+    ),
     cls=OrderCommands,
     rich_markup_mode="rich",
     pretty_exceptions_show_locals=False,
-    add_completion=False,
+    add_completion=True,
+    invoke_without_command=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 console = Console()
+NO_SERVERS_MESSAGE = (
+    "[yellow]No servers found. Start with [cyan]better-ssh import-ssh-config[/cyan] "
+    "or [cyan]better-ssh add[/cyan].[/yellow]"
+)
+
+
+def _print_no_servers_message() -> None:
+    """Print onboarding help for an empty server list."""
+    console.print(NO_SERVERS_MESSAGE)
 
 
 def _print_servers(servers: list[Server]) -> None:
     """Print servers table."""
     table = Table(title="Servers")
     table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Pin", justify="center", no_wrap=True)
     table.add_column("Name", style="bold")
     table.add_column("Connection")
     table.add_column("Auth", justify="center", no_wrap=True)
 
-    for s in servers:
-        auth = "key" if s.key_path else ("pwd" if s.password else "---")
-        table.add_row(s.id[:8], s.name, f"{s.username}@{s.host}:{s.port}", auth)
+    for s in _sort_servers(servers):
+        auth = _auth_label(s)
+        table.add_row(s.id[:8], _favorite_label(s), s.name, f"{s.username}@{s.host}:{s.port}", auth)
 
     console.print(table)
+
+
+def _sort_servers(servers: list[Server]) -> list[Server]:
+    """Sort servers for daily use: pinned first, then recent, then frequent, then name."""
+
+    def sort_key(server: Server) -> tuple[int, float, int, str]:
+        last_used_ts = 0.0
+        if server.last_used_at:
+            with contextlib.suppress(ValueError):
+                used_at = datetime.fromisoformat(server.last_used_at)
+                if used_at.tzinfo is None:
+                    used_at = used_at.replace(tzinfo=UTC)
+                last_used_ts = used_at.timestamp()
+
+        return (-int(server.favorite), -last_used_ts, -server.use_count, server.name.lower())
+
+    return sorted(servers, key=sort_key)
+
+
+def _select_server(servers: list[Server], message: str) -> Server:
+    """Select a server from the interactive menu."""
+    sorted_servers = _sort_servers(servers)
+
+    try:
+        selected_display = inquirer.select(
+            message=message,
+            choices=[server.display() for server in sorted_servers],
+            cycle=True,
+            vi_mode=False,
+            instruction="Use arrows to navigate, search by name",
+        ).execute()
+    except KeyboardInterrupt:
+        console.print("\n[dim]Cancelled.[/dim]")
+        raise typer.Exit(0)
+
+    for server in sorted_servers:
+        if server.display() == selected_display:
+            return server
+
+    console.print("[red]Failed to identify server[/red]")
+    raise typer.Exit(1)
+
+
+def _servers_matching_query(servers: list[Server], query: str) -> list[Server]:
+    """Return servers that loosely match the provided query."""
+    normalized_query = query.lower()
+    return [
+        server
+        for server in servers
+        if normalized_query in server.name.lower()
+        or normalized_query in server.host.lower()
+        or normalized_query in server.username.lower()
+        or server.id.startswith(query)
+    ]
+
+
+def _merge_servers_by_name(existing_servers: list[Server], imported_servers: list[Server]) -> list[Server]:
+    """Merge imported servers with existing records while preserving user data."""
+    merged_by_id = {server.id: server for server in existing_servers}
+    existing_by_name = {server.name.lower(): server for server in existing_servers}
+
+    for imported in imported_servers:
+        existing = existing_by_name.get(imported.name.lower())
+        if existing:
+            imported.id = existing.id
+            imported.password = existing.password
+            imported.favorite = existing.favorite
+            imported.tags = existing.tags
+            imported.notes = existing.notes
+            imported.use_count = existing.use_count
+            imported.last_used_at = existing.last_used_at
+        merged_by_id[imported.id] = imported
+
+    return list(merged_by_id.values())
+
+
+def _auth_label(server: Server) -> str:
+    """Return a user-facing auth label for a server."""
+    if server.certificate_path:
+        return "cert"
+    if server.key_path:
+        return "key"
+    if server.password:
+        return "pwd"
+    return "auto"
+
+
+def _favorite_label(server: Server) -> str:
+    """Return a user-facing favorite label for a server."""
+    return "pin" if server.favorite else ""
+
+
+@app.callback()
+def root(ctx: typer.Context) -> None:
+    """Open the connect flow when the CLI is run without a subcommand."""
+    if ctx.resilient_parsing or ctx.invoked_subcommand is not None:
+        return
+    connect_cmd(query=None, no_copy=False)
 
 
 @app.command("list", help="Show list of servers. Alias: ls")
@@ -70,7 +195,7 @@ def list_servers() -> None:
     """Show list of servers."""
     servers = storage.load_servers()
     if not servers:
-        console.print("[yellow]No servers found. Add one: better-ssh add[/yellow]")
+        _print_no_servers_message()
         return
     _print_servers(servers)
 
@@ -85,6 +210,7 @@ def add_server(
     use_key: bool = typer.Option(False, "--key", help="Use private key"),
     key_path: str | None = typer.Option(None, help="Path to key"),
     with_password: bool = typer.Option(False, "--password", help="Save password"),
+    certificate_path: str | None = typer.Option(None, "--certificate", help="Path to SSH certificate"),
 ):
     """Add a new server."""
     try:
@@ -99,7 +225,13 @@ def add_server(
                 key_path = typer.prompt("Path to private key (e.g. ~/.ssh/id_rsa)")
 
         server = Server(
-            name=name, host=host, port=port, username=username, password=password, key_path=key_path or None
+            name=name,
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            key_path=key_path or None,
+            certificate_path=certificate_path or None,
         )
         storage.upsert_server(server)
         console.print(f"[green]Added:[/green] {server.display()}  (id: {server.id})")
@@ -116,32 +248,9 @@ def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (
     if query is None:
         servers = storage.load_servers()
         if not servers:
-            console.print("[yellow]No servers found.[/yellow]")
+            _print_no_servers_message()
             raise typer.Exit(1)
-
-        choices = [(s.display(), s.id) for s in sorted(servers, key=lambda x: x.name.lower())]
-        try:
-            selected_display = inquirer.select(
-                message="Select server to remove:",
-                choices=[c[0] for c in choices],
-                cycle=True,
-                vi_mode=False,
-                instruction="↑↓ navigate, search by name",
-            ).execute()
-        except KeyboardInterrupt:
-            console.print("\n[dim]Cancelled.[/dim]")
-            raise typer.Exit(0)
-
-        # Find selected server
-        srv = None
-        for s in servers:
-            if s.display() == selected_display:
-                srv = s
-                break
-
-        if not srv:
-            console.print("[red]Failed to identify server[/red]")
-            raise typer.Exit(1)
+        srv = _select_server(servers, "Select server to remove:")
     else:
         # Use query to find server
         srv = storage.find_server(query)
@@ -164,12 +273,19 @@ def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (
 
 @app.command("edit", help="Edit a server. Alias: e")
 @app.command("e", hidden=True)
-def edit(query: str = typer.Argument(..., help="ID/name/partial name")):
+def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
     """Edit a server."""
-    srv = storage.find_server(query)
-    if not srv:
-        console.print("[red]Server not found[/red]")
-        raise typer.Exit(1)
+    if query is None:
+        servers = storage.load_servers()
+        if not servers:
+            _print_no_servers_message()
+            raise typer.Exit(1)
+        srv = _select_server(servers, "Select server to edit:")
+    else:
+        srv = storage.find_server(query)
+        if not srv:
+            console.print("[red]Server not found[/red]")
+            raise typer.Exit(1)
 
     try:
         name = typer.prompt("Name", default=srv.name)
@@ -180,6 +296,7 @@ def edit(query: str = typer.Argument(..., help="ID/name/partial name")):
         # Offer current key or default if no key
         default_key_for_edit = srv.key_path or find_default_ssh_key() or ""
         key_path = typer.prompt("Key path (empty for none)", default=default_key_for_edit)
+        certificate_path = typer.prompt("Certificate path (empty for none)", default=srv.certificate_path or "")
 
         change_pwd = typer.confirm("Change password?", default=False)
         password = srv.password
@@ -194,12 +311,67 @@ def edit(query: str = typer.Argument(..., help="ID/name/partial name")):
         srv.port = int(port)
         srv.username = username
         srv.key_path = key_path or None
+        srv.certificate_path = certificate_path or None
         srv.password = password
         storage.upsert_server(srv)
         console.print("[green]Saved.[/green]")
     except (KeyboardInterrupt, typer.Abort):
         console.print("\n[dim]Cancelled.[/dim]")
         raise typer.Exit(0)
+
+
+@app.command("pin", help="Pin a server to the top of lists.")
+def pin_server(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+    """Pin a server for quick access."""
+    if query is None:
+        servers = storage.load_servers()
+        if not servers:
+            _print_no_servers_message()
+            raise typer.Exit(1)
+        srv = _select_server(servers, "Select server to pin:")
+    else:
+        srv = storage.find_server(query)
+        if not srv:
+            console.print("[red]Server not found[/red]")
+            raise typer.Exit(1)
+
+    if srv.favorite:
+        console.print(f"[yellow]Already pinned:[/yellow] {srv.name}")
+        return
+
+    if not storage.set_server_favorite(srv.id, True):
+        console.print("[red]Failed to pin server[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Pinned:[/green] {srv.name}")
+
+
+@app.command("unpin", help="Remove a server from pinned favorites.")
+def unpin_server(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+    """Remove a server from favorites."""
+    if query is None:
+        servers = [server for server in storage.load_servers() if server.favorite]
+        if not servers:
+            console.print(
+                "[yellow]No pinned servers found. Pin one with [cyan]better-ssh pin <query>[/cyan].[/yellow]"
+            )
+            raise typer.Exit(1)
+        srv = _select_server(servers, "Select server to unpin:")
+    else:
+        srv = storage.find_server(query)
+        if not srv:
+            console.print("[red]Server not found[/red]")
+            raise typer.Exit(1)
+
+    if not srv.favorite:
+        console.print(f"[yellow]Server is not pinned:[/yellow] {srv.name}")
+        return
+
+    if not storage.set_server_favorite(srv.id, False):
+        console.print("[red]Failed to unpin server[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Unpinned:[/green] {srv.name}")
 
 
 @app.command("connect", help="Connect to a server. Alias: c")
@@ -213,40 +385,27 @@ def connect_cmd(
     if query is None:
         servers = storage.load_servers()
         if not servers:
-            console.print("[yellow]No servers found. Add one: better-ssh add[/yellow]")
+            _print_no_servers_message()
             raise typer.Exit(1)
-
-        choices = [(s.display(), s.id) for s in sorted(servers, key=lambda x: x.name.lower())]
-        try:
-            selected_display = inquirer.select(
-                message="Select server to connect:",
-                choices=[c[0] for c in choices],
-                cycle=True,
-                vi_mode=False,
-                instruction="↑↓ navigate, search by name",
-            ).execute()
-        except KeyboardInterrupt:
-            console.print("\n[dim]Cancelled.[/dim]")
-            raise typer.Exit(0)
-
-        # Find selected server
-        srv = None
-        for s in servers:
-            if s.display() == selected_display:
-                srv = s
-                break
-
-        if not srv:
-            console.print("[red]Failed to identify server[/red]")
-            raise typer.Exit(1)
+        srv = _select_server(servers, "Select server to connect:")
     else:
         # Use query to find server
         srv = storage.find_server(query)
         if not srv:
-            console.print("[red]Server not found[/red]")
-            raise typer.Exit(1)
+            servers = storage.load_servers()
+            if not servers:
+                _print_no_servers_message()
+                raise typer.Exit(1)
+
+            matching_servers = _servers_matching_query(servers, query)
+            if matching_servers:
+                srv = _select_server(matching_servers, f"Select server to connect for '{query}':")
+            else:
+                srv = _select_server(servers, f"No direct match for '{query}'. Select server to connect:")
 
     rc = connect(srv, copy_password=not no_copy)
+    if rc != 127:
+        storage.record_server_use(srv.id)
     raise typer.Exit(rc)
 
 
@@ -259,32 +418,12 @@ def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
         servers = storage.load_servers()
         servers_with_pwd = [s for s in servers if s.password]
         if not servers_with_pwd:
-            console.print("[yellow]No servers with saved passwords.[/yellow]")
+            if not servers:
+                _print_no_servers_message()
+            else:
+                console.print("[yellow]No servers with saved passwords.[/yellow]")
             raise typer.Exit(1)
-
-        choices = [(s.display(), s.id) for s in sorted(servers_with_pwd, key=lambda x: x.name.lower())]
-        try:
-            selected_display = inquirer.select(
-                message="Select server to copy password:",
-                choices=[c[0] for c in choices],
-                cycle=True,
-                vi_mode=False,
-                instruction="↑↓ navigate, search by name",
-            ).execute()
-        except KeyboardInterrupt:
-            console.print("\n[dim]Cancelled.[/dim]")
-            raise typer.Exit(0)
-
-        # Find selected server
-        srv = None
-        for s in servers_with_pwd:
-            if s.display() == selected_display:
-                srv = s
-                break
-
-        if not srv:
-            console.print("[red]Failed to identify server[/red]")
-            raise typer.Exit(1)
+        srv = _select_server(servers_with_pwd, "Select server to copy password:")
     else:
         # Use query to find server
         srv = storage.find_server(query)
@@ -305,32 +444,12 @@ def show_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
         servers = storage.load_servers()
         servers_with_pwd = [s for s in servers if s.password]
         if not servers_with_pwd:
-            console.print("[yellow]No servers with saved passwords.[/yellow]")
+            if not servers:
+                _print_no_servers_message()
+            else:
+                console.print("[yellow]No servers with saved passwords.[/yellow]")
             raise typer.Exit(1)
-
-        choices = [(s.display(), s.id) for s in sorted(servers_with_pwd, key=lambda x: x.name.lower())]
-        try:
-            selected_display = inquirer.select(
-                message="Select server to show password:",
-                choices=[c[0] for c in choices],
-                cycle=True,
-                vi_mode=False,
-                instruction="↑↓ navigate, search by name",
-            ).execute()
-        except KeyboardInterrupt:
-            console.print("\n[dim]Cancelled.[/dim]")
-            raise typer.Exit(0)
-
-        # Find selected server
-        srv = None
-        for s in servers_with_pwd:
-            if s.display() == selected_display:
-                srv = s
-                break
-
-        if not srv:
-            console.print("[red]Failed to identify server[/red]")
-            raise typer.Exit(1)
+        srv = _select_server(servers_with_pwd, "Select server to show password:")
     else:
         # Use query to find server
         srv = storage.find_server(query)
@@ -349,32 +468,9 @@ def ping_server(query: str | None = typer.Argument(None, help="ID/name/partial n
     if query is None:
         servers = storage.load_servers()
         if not servers:
-            console.print("[yellow]No servers found.[/yellow]")
+            _print_no_servers_message()
             raise typer.Exit(1)
-
-        choices = [(s.display(), s.id) for s in sorted(servers, key=lambda x: x.name.lower())]
-        try:
-            selected_display = inquirer.select(
-                message="Select server to ping:",
-                choices=[c[0] for c in choices],
-                cycle=True,
-                vi_mode=False,
-                instruction="↑↓ navigate, search by name",
-            ).execute()
-        except KeyboardInterrupt:
-            console.print("\n[dim]Cancelled.[/dim]")
-            raise typer.Exit(0)
-
-        # Find selected server
-        srv = None
-        for s in servers:
-            if s.display() == selected_display:
-                srv = s
-                break
-
-        if not srv:
-            console.print("[red]Failed to identify server[/red]")
-            raise typer.Exit(1)
+        srv = _select_server(servers, "Select server to ping:")
     else:
         # Use query to find server
         srv = storage.find_server(query)
@@ -399,7 +495,7 @@ def health_check():
     """Check availability of all servers."""
     servers = storage.load_servers()
     if not servers:
-        console.print("[yellow]No servers found.[/yellow]")
+        _print_no_servers_message()
         raise typer.Exit(1)
 
     console.print(f"Checking {len(servers)} server(s)...\n")
@@ -450,26 +546,26 @@ def enable_encryption():
 
     # Show disclaimer
     disclaimer = f"""
-[bold yellow]⚠️  WARNING: Enabling Password Encryption[/bold yellow]
+[bold yellow][!] WARNING: Enabling Password Encryption[/bold yellow]
 
 [bold]How it works:[/bold]
-• Passwords will be encrypted using your SSH key
-• Using key: [cyan]{ssh_key}[/cyan]
-• Encryption key is derived from SSH key content
+- Passwords will be encrypted using your SSH key
+- Using key: [cyan]{ssh_key}[/cyan]
+- Encryption key is derived from SSH key content
 
 [bold red]IMPORTANT:[/bold red]
-• If you [bold]delete or change[/bold] the SSH key — you will [bold]lose access[/bold] to passwords
-• Passwords can only be decrypted on this computer with this SSH key
-• Make a [bold]backup[/bold] of the SSH key: {ssh_key}
-• Make a [bold]backup[/bold] of the password file (before encryption)
+- If you [bold]delete or change[/bold] the SSH key, you will [bold]lose access[/bold] to passwords
+- Passwords can only be decrypted on this computer with this SSH key
+- Make a [bold]backup[/bold] of the SSH key: {ssh_key}
+- Make a [bold]backup[/bold] of the password file (before encryption)
 
 [bold green]Benefits:[/bold green]
-• Passwords are protected even if servers.json file is leaked
-• No need to enter master password on every run
-• SSH key is already protected by OS file permissions
+- Passwords are protected even if servers.json file is leaked
+- No need to enter master password on every run
+- SSH key is already protected by OS file permissions
 """
 
-    console.print(Panel(disclaimer, title="🔐 Password Encryption", border_style="yellow"))
+    console.print(Panel(disclaimer, title="Password Encryption", border_style="yellow"))
 
     try:
         console.print("\n[bold yellow]Do you understand the risks and want to enable encryption?[/bold yellow]")
@@ -490,7 +586,7 @@ def enable_encryption():
     servers = storage.load_servers()  # load in plaintext
     storage.save_servers(servers)  # save encrypted
 
-    console.print("\n[bold green]✓ Encryption enabled![/bold green]")
+    console.print("\n[bold green]Encryption enabled.[/bold green]")
     console.print(f"Using SSH key: [cyan]{ssh_key}[/cyan]")
     console.print(f"Encrypted servers: [cyan]{len([s for s in servers if s.password])}[/cyan]")
 
@@ -504,7 +600,7 @@ def disable_encryption():
 
     # Warning
     warning = """
-[bold yellow]⚠️  Disabling Encryption[/bold yellow]
+[bold yellow][!] Disabling Encryption[/bold yellow]
 
 All passwords will be decrypted and saved in [bold red]plaintext[/bold red] \
 in servers.json file.
@@ -513,7 +609,7 @@ in servers.json file.
 to anyone with access to your computer.
 """
 
-    console.print(Panel(warning, title="⚠️  Warning", border_style="red"))
+    console.print(Panel(warning, title="Warning", border_style="red"))
 
     try:
         console.print("\n[bold red]Are you sure you want to disable encryption?[/bold red]")
@@ -549,20 +645,20 @@ def encryption_status():
         ssh_key = settings.get("encryption_key_source", "unknown")
         ssh_key_exists = Path(ssh_key).exists() if ssh_key != "unknown" else False
 
-        key_status = "[green]✓ exists[/green]" if ssh_key_exists else "[red]✗ not found![/red]"
+        key_status = "[green]exists[/green]" if ssh_key_exists else "[red]not found![/red]"
         status = f"""
-[bold green]✓ Encryption enabled[/bold green]
+[bold green]Encryption enabled[/bold green]
 
 SSH key: [cyan]{ssh_key}[/cyan]
 Key status: {key_status}
 
 Passwords are automatically encrypted on save and decrypted on read.
 """
-        console.print(Panel(status, title="🔐 Encryption Status", border_style="green"))
+        console.print(Panel(status, title="Encryption Status", border_style="green"))
     else:
         available_key = find_ssh_key_for_encryption()
         status = """
-[bold yellow]✗ Encryption disabled[/bold yellow]
+[bold yellow]Encryption disabled[/bold yellow]
 
 Passwords are stored in [bold red]plaintext[/bold red] in servers.json file.
 
@@ -573,7 +669,7 @@ To enable encryption use: [cyan]better-ssh encrypt[/cyan]
         else:
             status += "\n[yellow]SSH key not found. Create one: ssh-keygen -t ed25519[/yellow]"
 
-        console.print(Panel(status, title="⚠️  Encryption Status", border_style="yellow"))
+        console.print(Panel(status, title="Encryption Status", border_style="yellow"))
 
 
 @app.command("export", help="Export servers to JSON file. Alias: ex")
@@ -660,7 +756,7 @@ def export_servers(
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(export_data, ensure_ascii=False, indent=2), encoding="utf-8")
-        console.print(f"[green]✓ Exported {len(servers)} server(s) to:[/green] {output_path.absolute()}")
+        console.print(f"[green]Exported {len(servers)} server(s) to:[/green] {output_path.absolute()}")
     except Exception as e:
         console.print(f"[red]Export failed: {e}[/red]")
         raise typer.Exit(1)
@@ -703,8 +799,7 @@ def import_servers(
     # Show what will be imported
     console.print(f"\n[bold]Found {len(imported_servers)} server(s) to import:[/bold]")
     for srv in imported_servers:
-        auth = "key" if srv.key_path else ("pwd" if srv.password else "---")
-        console.print(f"  • {srv.name} ({srv.username}@{srv.host}:{srv.port}) [{auth}]")
+        console.print(f"  - {srv.name} ({srv.username}@{srv.host}:{srv.port}) [{_auth_label(srv)}]")
 
     # Ask for import mode if there are existing servers
     existing_servers = storage.load_servers()
@@ -756,7 +851,78 @@ def import_servers(
         final_servers = imported_servers
 
     storage.save_servers(final_servers)
-    console.print(f"[green]✓ Successfully imported {len(imported_servers)} server(s)![/green]")
+    console.print(f"[green]Successfully imported {len(imported_servers)} server(s).[/green]")
+    console.print(f"Total servers: {len(final_servers)}")
+
+
+@app.command("import-ssh-config", help="Import hosts from SSH config. Alias: isc")
+@app.command("isc", hidden=True)
+def import_ssh_config_cmd(
+    config_file: str | None = typer.Argument(None, help="SSH config path (default: ~/.ssh/config)"),
+):
+    """Import servers from an OpenSSH config file."""
+    config_path = Path(config_file).expanduser() if config_file else get_default_ssh_config_path()
+
+    if not config_path.exists():
+        console.print(f"[red]SSH config not found:[/red] {config_path}")
+        raise typer.Exit(1)
+
+    try:
+        imported_servers = import_ssh_config(config_path)
+    except RuntimeError as e:
+        console.print(f"[red]SSH config import failed:[/red] {e}")
+        raise typer.Exit(1)
+
+    if not imported_servers:
+        console.print("[yellow]No importable hosts found in SSH config.[/yellow]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold]Found {len(imported_servers)} SSH host(s) in:[/bold] {config_path}")
+    for srv in imported_servers:
+        console.print(f"  - {srv.name} ({srv.username}@{srv.host}:{srv.port}) [{_auth_label(srv)}]")
+
+    existing_servers = storage.load_servers()
+    merge_mode = True
+
+    if existing_servers:
+        console.print(f"\n[yellow]You have {len(existing_servers)} existing server(s).[/yellow]")
+
+        try:
+            mode_choice = inquirer.select(
+                message="Select SSH config import mode:",
+                choices=[
+                    "Merge - update matching host names and keep everything else",
+                    "Replace all - delete existing servers and use only SSH config hosts",
+                ],
+                cycle=True,
+                vi_mode=False,
+            ).execute()
+        except KeyboardInterrupt:
+            console.print("\n[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+        merge_mode = "Merge" in mode_choice
+
+        if merge_mode:
+            console.print("\n[cyan]Merge mode:[/cyan] Matching names will be updated, metadata will be preserved.\n")
+        else:
+            console.print("\n[red]Replace mode:[/red] All existing servers will be deleted!\n")
+
+    try:
+        if not typer.confirm("Continue with SSH config import?", default=False):
+            console.print("[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+    except (KeyboardInterrupt, typer.Abort):
+        console.print("\n[dim]Cancelled.[/dim]")
+        raise typer.Exit(0)
+
+    if merge_mode:
+        final_servers = _merge_servers_by_name(existing_servers, imported_servers)
+    else:
+        final_servers = imported_servers
+
+    storage.save_servers(final_servers)
+    console.print(f"[green]Successfully imported {len(imported_servers)} SSH host(s).[/green]")
     console.print(f"Total servers: {len(final_servers)}")
 
 

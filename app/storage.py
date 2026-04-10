@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from platformdirs import user_config_dir
@@ -107,13 +108,45 @@ def remove_server(server_id: str) -> bool:
     return changed
 
 
+def record_server_use(server_id: str) -> bool:
+    """Update usage metadata for a server after a connection attempt."""
+    servers = load_servers()
+    used_at = datetime.now(UTC).isoformat()
+
+    for server in servers:
+        if server.id == server_id:
+            server.use_count += 1
+            server.last_used_at = used_at
+            save_servers(servers)
+            return True
+
+    return False
+
+
+def set_server_favorite(server_id: str, favorite: bool) -> bool:
+    """Set favorite state for a server."""
+    servers = load_servers()
+
+    for server in servers:
+        if server.id == server_id:
+            server.favorite = favorite
+            save_servers(servers)
+            return True
+
+    return False
+
+
 def find_server(query: str) -> Server | None:
-    """Find server by ID, exact name, or partial name match."""
+    """Find server by ID/prefix, exact name, or partial name match."""
     servers = load_servers()
     # exact id
     for s in servers:
         if s.id == query:
             return s
+    # unique id prefix
+    prefix_matches = [s for s in servers if s.id.startswith(query)]
+    if len(prefix_matches) == 1:
+        return prefix_matches[0]
     # case-insensitive unique name
     matches = [s for s in servers if s.name.lower() == query.lower()]
     if len(matches) == 1:

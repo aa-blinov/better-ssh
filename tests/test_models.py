@@ -23,6 +23,10 @@ def test_server_creation_minimal():
     assert server.port == 22  # default
     assert server.password is None
     assert server.key_path is None
+    assert server.certificate_path is None
+    assert server.favorite is False
+    assert server.use_count == 0
+    assert server.last_used_at is None
     assert server.tags == []
     assert server.notes is None
     # UUID should be generated
@@ -39,6 +43,10 @@ def test_server_creation_full():
         username="root",
         password="secret",
         key_path="/home/user/.ssh/id_rsa",
+        certificate_path="/home/user/.ssh/id_rsa-cert.pub",
+        favorite=True,
+        use_count=12,
+        last_used_at="2026-04-10T12:00:00+00:00",
         tags=["prod", "web"],
         notes="Production server",
     )
@@ -50,20 +58,30 @@ def test_server_creation_full():
     assert server.username == "root"
     assert server.password == "secret"
     assert server.key_path == "/home/user/.ssh/id_rsa"
+    assert server.certificate_path == "/home/user/.ssh/id_rsa-cert.pub"
+    assert server.favorite is True
+    assert server.use_count == 12
+    assert server.last_used_at == "2026-04-10T12:00:00+00:00"
     assert server.tags == ["prod", "web"]
     assert server.notes == "Production server"
 
 
 @pytest.mark.parametrize(
-    ("password", "key_path", "expected_auth"),
+    ("password", "key_path", "certificate_path", "expected_auth"),
     [
-        (None, None, "---"),
-        ("secret", None, "pwd"),
-        (None, "/path/to/key", "key"),
-        ("secret", "/path/to/key", "key"),  # key takes precedence
+        (None, None, None, "auto"),
+        ("secret", None, None, "pwd"),
+        (None, "/path/to/key", None, "key"),
+        ("secret", "/path/to/key", None, "key"),
+        (None, "/path/to/key", "/path/to/key-cert.pub", "cert"),
     ],
 )
-def test_server_display_auth(password: str | None, key_path: str | None, expected_auth: str):
+def test_server_display_auth(
+    password: str | None,
+    key_path: str | None,
+    certificate_path: str | None,
+    expected_auth: str,
+):
     """Test display() method shows correct auth type."""
     server = Server(
         name="Test",
@@ -71,6 +89,7 @@ def test_server_display_auth(password: str | None, key_path: str | None, expecte
         username="user",
         password=password,
         key_path=key_path,
+        certificate_path=certificate_path,
     )
 
     display = server.display()
@@ -91,6 +110,19 @@ def test_server_display_format():
     assert "MyServer" in display
     assert "admin@example.com:2222" in display
     assert "pwd" in display
+
+
+def test_server_display_marks_pinned_servers():
+    """Test display() marks pinned servers clearly."""
+    server = Server(
+        name="PinnedServer",
+        host="example.com",
+        username="admin",
+        favorite=True,
+    )
+
+    display = server.display()
+    assert display.startswith("[pin] PinnedServer")
 
 
 def test_server_unique_ids():

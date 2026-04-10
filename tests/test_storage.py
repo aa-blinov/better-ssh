@@ -13,9 +13,11 @@ from app.storage import (
     is_encryption_enabled,
     load_servers,
     load_settings,
+    record_server_use,
     remove_server,
     save_servers,
     save_settings,
+    set_server_favorite,
     upsert_server,
 )
 
@@ -66,7 +68,7 @@ def test_save_and_load_servers(temp_config_dir: Path):
     """Test server persistence."""
     servers = [
         Server(name="Server1", host="192.168.1.1", username="user1", password="pass1"),
-        Server(name="Server2", host="192.168.1.2", username="user2", key_path="/path/to/key"),
+        Server(name="Server2", host="192.168.1.2", username="user2", key_path="/path/to/key", favorite=True),
     ]
 
     save_servers(servers)
@@ -77,6 +79,7 @@ def test_save_and_load_servers(temp_config_dir: Path):
     assert loaded[0].password == "pass1"
     assert loaded[1].name == "Server2"
     assert loaded[1].key_path == "/path/to/key"
+    assert loaded[1].favorite is True
 
 
 def test_load_servers_with_data(servers_json_file: Path):
@@ -185,6 +188,43 @@ def test_remove_server_not_exists(servers_json_file: Path):
     assert len(servers) == 3  # unchanged
 
 
+def test_record_server_use_updates_metadata(servers_json_file: Path):
+    """Test successful usage recording updates count and timestamp."""
+    result = record_server_use("test-id-002")
+
+    assert result is True
+
+    servers = load_servers()
+    updated = next(server for server in servers if server.id == "test-id-002")
+    assert updated.use_count == 1
+    assert updated.last_used_at is not None
+
+
+def test_record_server_use_not_found(servers_json_file: Path):
+    """Test usage recording returns False for unknown server IDs."""
+    result = record_server_use("missing-id")
+
+    assert result is False
+
+
+def test_set_server_favorite_updates_server(servers_json_file: Path):
+    """Test favorite flag can be updated for an existing server."""
+    result = set_server_favorite("test-id-003", True)
+
+    assert result is True
+
+    servers = load_servers()
+    updated = next(server for server in servers if server.id == "test-id-003")
+    assert updated.favorite is True
+
+
+def test_set_server_favorite_not_found(servers_json_file: Path):
+    """Test favorite update returns False for unknown server IDs."""
+    result = set_server_favorite("missing-id", True)
+
+    assert result is False
+
+
 def test_find_server_by_id(servers_json_file: Path):
     """Test finding server by exact ID."""
     servers = load_servers()
@@ -193,6 +233,21 @@ def test_find_server_by_id(servers_json_file: Path):
     found = find_server(target_id)
     assert found is not None
     assert found.id == target_id
+
+
+def test_find_server_by_id_prefix(temp_config_dir: Path):
+    """Test finding server by unique ID prefix."""
+    save_servers(
+        [
+            Server(id="alpha-11111111", name="Alpha", host="host1", username="user1"),
+            Server(id="beta-22222222", name="Beta", host="host2", username="user2"),
+        ]
+    )
+
+    found = find_server("alpha-11")
+
+    assert found is not None
+    assert found.name == "Alpha"
 
 
 def test_find_server_by_exact_name(servers_json_file: Path):
