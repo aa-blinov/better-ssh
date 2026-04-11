@@ -302,6 +302,7 @@ uv run pytest --cov=app --cov-report=html       # with coverage report
 - `tests/test_encryption.py` — Encryption/decryption tests
 - `tests/test_storage.py` — Configuration persistence tests
 - `tests/test_ssh.py` — SSH command and availability tests
+- `tests/test_ssh_config.py` — SSH config importer tests
 - `tests/test_cli.py` — CLI commands and interface tests
 
 ### Submitting Changes
