@@ -13,7 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import storage
-from .encryption import encrypt_password, find_ssh_key, find_ssh_key_for_encryption, is_encrypted
+from .encryption import decrypt_password, encrypt_password, find_ssh_key, find_ssh_key_for_encryption, is_encrypted
 from .models import Server
 from .ssh import check_server_availability, connect
 from .ssh_config import get_default_ssh_config_path, import_ssh_config
@@ -593,15 +593,35 @@ def enable_encryption():
         console.print("\n[dim]Cancelled.[/dim]")
         raise typer.Exit(0)
 
+    # Load servers BEFORE enabling encryption so we get the raw state.
+    # If passwords are stuck (encrypted but encryption is disabled), try to
+    # recover them with the current salt; clear and warn if irrecoverable.
+    servers = storage.load_servers()
+
+    stuck: list[str] = []
+    if not storage.is_encryption_enabled():
+        salt = storage.get_or_create_encryption_salt()
+        for server in servers:
+            if server.password and is_encrypted(server.password):
+                try:
+                    server.password = decrypt_password(server.password, salt)
+                except Exception:
+                    stuck.append(server.name)
+                    server.password = None
+
+    if stuck:
+        console.print(f"\n[yellow]Warning: {len(stuck)} server(s) had unrecoverable passwords:[/yellow]")
+        for name in stuck:
+            console.print(f"  [dim]• {name}[/dim]")
+        console.print("[yellow]These passwords have been cleared. Re-enter with [cyan]bssh edit <name>[/cyan][/yellow]")
+
     # Enable encryption
     settings = storage.load_settings()
     settings["encryption_enabled"] = True
     settings["encryption_key_source"] = str(ssh_key)
     storage.save_settings(settings)
 
-    # Rewrite all servers to encrypt passwords
-    servers = storage.load_servers()  # load in plaintext
-    storage.save_servers(servers)  # save encrypted
+    storage.save_servers(servers)
 
     console.print("\n[bold green]Encryption enabled.[/bold green]")
     console.print(f"Using SSH key: [cyan]{ssh_key}[/cyan]")
@@ -638,15 +658,29 @@ to anyone with access to your computer.
         console.print("\n[dim]Cancelled.[/dim]")
         raise typer.Exit(0)
 
-    # Load servers (they will be decrypted automatically)
+    # Load servers (auto-decrypts with current salt).
+    # Any passwords that still look encrypted after load are irrecoverable —
+    # clear them and warn rather than saving ciphertext as "plaintext".
     servers = storage.load_servers()
+
+    stuck: list[str] = []
+    for server in servers:
+        if server.password and is_encrypted(server.password):
+            stuck.append(server.name)
+            server.password = None
+
+    if stuck:
+        console.print(f"\n[yellow]Warning: {len(stuck)} server(s) had unrecoverable passwords:[/yellow]")
+        for name in stuck:
+            console.print(f"  [dim]• {name}[/dim]")
+        console.print("[yellow]These passwords have been cleared. Re-enter with [cyan]bssh edit <name>[/cyan][/yellow]")
 
     # Disable encryption
     settings = storage.load_settings()
     settings["encryption_enabled"] = False
     storage.save_settings(settings)
 
-    # Save servers (now in plaintext)
+    # Save servers in plaintext
     storage.save_servers(servers)
 
     console.print("\n[bold yellow]Encryption disabled.[/bold yellow]")
