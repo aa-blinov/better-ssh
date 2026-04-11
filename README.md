@@ -169,7 +169,7 @@ Use `bssh pin <query>` to keep critical hosts above the normal recent/frequent o
 
 Most commands work without arguments and will present an interactive menu.
 
-To add a server with a password use `bssh add --password`. Without the flag no password is stored — add one later with `bssh edit`.
+`bssh add` interactively asks whether to set an SSH key and password after the basic fields.
 
 For password-based hosts, `bssh` copies the saved password to your clipboard before starting OpenSSH. You still paste it into the SSH password prompt manually; the password is not injected into the `ssh` command automatically.
 
