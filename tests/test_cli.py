@@ -310,19 +310,16 @@ def test_list_alias(cli_with_servers: CliRunner):
     assert "TestServer1" in result.stdout
 
 
-def test_add_command_without_password_flag_skips_prompt(
+def test_add_command_declines_key_and_password(
     runner: CliRunner,
     temp_config_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Test add without --password flag does not prompt for password."""
+    """Test add: declining both key and password confirms leaves them unset."""
     prompt_calls: list[str] = []
 
-    def fake_prompt(text: str, *args, **kwargs):
-        prompt_calls.append(text)
-        return ""
-
-    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: prompt_calls.append(text) or "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
 
     result = runner.invoke(
         app,
@@ -331,42 +328,39 @@ def test_add_command_without_password_flag_skips_prompt(
 
     assert result.exit_code == 0
     assert "Password" not in prompt_calls
+    assert "Path to private key" not in prompt_calls
 
     added = load_servers()
     assert len(added) == 1
     assert added[0].name == "NewHost"
     assert added[0].password is None
+    assert added[0].key_path is None
 
 
-def test_add_command_password_flag_triggers_prompt(
+def test_add_command_confirms_password_prompts_with_confirmation(
     runner: CliRunner,
     temp_config_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Test add --password triggers a hidden password prompt with confirmation."""
+    """Test add: confirming password triggers a hidden prompt with confirmation."""
     prompt_calls: list[tuple[str, dict[str, object]]] = []
 
-    def fake_prompt(text: str, *args, **kwargs):
-        prompt_calls.append((text, kwargs))
-        return "secret123"
-
-    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
+    monkeypatch.setattr(
+        "app.cli.typer.prompt",
+        lambda text, *a, **kw: prompt_calls.append((text, kw)) or "secret123",
+    )
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: text == "Add password?",
+    )
 
     result = runner.invoke(
         app,
-        ["add", "--name", "PwdHost", "--host", "10.0.0.11", "--port", "22", "--username", "root", "--password"],
+        ["add", "--name", "PwdHost", "--host", "10.0.0.11", "--port", "22", "--username", "root"],
     )
 
     assert result.exit_code == 0
-    assert prompt_calls == [
-        (
-            "Password",
-            {
-                "hide_input": True,
-                "confirmation_prompt": True,
-            },
-        )
-    ]
+    assert prompt_calls == [("Password", {"hide_input": True, "confirmation_prompt": True})]
 
     added = load_servers()
     assert len(added) == 1
