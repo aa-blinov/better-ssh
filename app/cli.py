@@ -189,31 +189,28 @@ def add_server(
     host: str | None = typer.Option(None, prompt=True),
     port: int = typer.Option(22, prompt=True),
     username: str | None = typer.Option(None, prompt=True),
-    use_key: bool = typer.Option(False, "--key", help="Use private key"),
-    key_path: str | None = typer.Option(None, help="Path to key"),
-    use_password: bool = typer.Option(False, "--password", help="Prompt for password"),
-    certificate_path: str | None = typer.Option(None, "--certificate", help="Path to SSH certificate"),
 ):
     """Add a new server."""
     try:
-        password = None
-        if use_password:
-            password = typer.prompt("Password", hide_input=True, confirmation_prompt=True) or None
-        if use_key and not key_path:
+        key_path: str | None = None
+        if typer.confirm("Add SSH key?", default=False):
             default_key = find_ssh_key()
             if default_key:
-                key_path = typer.prompt("Path to private key", default=str(default_key))
+                key_path = typer.prompt("Path to private key", default=str(default_key)) or None
             else:
-                key_path = typer.prompt("Path to private key (e.g. ~/.ssh/id_rsa)")
+                key_path = typer.prompt("Path to private key (e.g. ~/.ssh/id_rsa)") or None
+
+        password: str | None = None
+        if typer.confirm("Add password?", default=False):
+            password = typer.prompt("Password", hide_input=True, confirmation_prompt=True) or None
 
         server = Server(
             name=name,
             host=host,
             port=port,
             username=username,
-            password=password or None,
-            key_path=key_path or None,
-            certificate_path=certificate_path or None,
+            password=password,
+            key_path=key_path,
         )
         storage.upsert_server(server)
         console.print(f"[green]Added:[/green] {server.display()}  (id: {server.id})")
