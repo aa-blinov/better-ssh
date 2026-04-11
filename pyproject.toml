@@ -48,6 +48,7 @@ dev = [
 
 [project.scripts]
 better-ssh = "app.cli:main"
+bssh = "app.cli:main"
 
 [build-system]
 requires = ["hatchling"]
