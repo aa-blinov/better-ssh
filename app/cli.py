@@ -1,37 +1,22 @@
 from __future__ import annotations
 
-import contextlib
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 
 import click
 import pyperclip
 import typer
 from InquirerPy import inquirer
+from InquirerPy.base.control import Choice
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from . import storage
-from .encryption import encrypt_password, find_ssh_key_for_encryption
+from .encryption import encrypt_password, find_ssh_key, find_ssh_key_for_encryption
 from .models import Server
 from .ssh import check_server_availability, connect
 from .ssh_config import get_default_ssh_config_path, import_ssh_config
-
-
-def find_default_ssh_key() -> str | None:
-    """Find default SSH key in ~/.ssh/."""
-    ssh_dir = Path.home() / ".ssh"
-    if not ssh_dir.exists():
-        return None
-
-    # Priority: ed25519 > rsa > ecdsa > dsa
-    for key_name in ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"]:
-        key_path = ssh_dir / key_name
-        if key_path.exists():
-            return str(key_path)
-    return None
 
 
 class OrderCommands(typer.core.TyperGroup):
@@ -95,14 +80,7 @@ def _sort_servers(servers: list[Server]) -> list[Server]:
     """Sort servers for daily use: pinned first, then recent, then frequent, then name."""
 
     def sort_key(server: Server) -> tuple[int, float, int, str]:
-        last_used_ts = 0.0
-        if server.last_used_at:
-            with contextlib.suppress(ValueError):
-                used_at = datetime.fromisoformat(server.last_used_at)
-                if used_at.tzinfo is None:
-                    used_at = used_at.replace(tzinfo=UTC)
-                last_used_ts = used_at.timestamp()
-
+        last_used_ts = server.last_used_at.timestamp() if server.last_used_at else 0.0
         return (-int(server.favorite), -last_used_ts, -server.use_count, server.name.lower())
 
     return sorted(servers, key=sort_key)
@@ -111,11 +89,12 @@ def _sort_servers(servers: list[Server]) -> list[Server]:
 def _select_server(servers: list[Server], message: str) -> Server:
     """Select a server from the interactive menu."""
     sorted_servers = _sort_servers(servers)
+    by_id = {s.id: s for s in sorted_servers}
 
     try:
-        selected_display = inquirer.select(
+        selected_id = inquirer.select(
             message=message,
-            choices=[server.display() for server in sorted_servers],
+            choices=[Choice(value=s.id, name=s.display()) for s in sorted_servers],
             cycle=True,
             vi_mode=False,
             instruction="Use arrows to navigate, search by name",
@@ -124,12 +103,11 @@ def _select_server(servers: list[Server], message: str) -> Server:
         console.print("\n[dim]Cancelled.[/dim]")
         raise typer.Exit(0)
 
-    for server in sorted_servers:
-        if server.display() == selected_display:
-            return server
-
-    console.print("[red]Failed to identify server[/red]")
-    raise typer.Exit(1)
+    server = by_id.get(selected_id)
+    if server is None:
+        console.print("[red]Failed to identify server[/red]")
+        raise typer.Exit(1)
+    return server
 
 
 def _servers_matching_query(servers: list[Server], query: str) -> list[Server]:
@@ -153,14 +131,18 @@ def _merge_servers_by_name(existing_servers: list[Server], imported_servers: lis
     for imported in imported_servers:
         existing = existing_by_name.get(imported.name.lower())
         if existing:
-            imported.id = existing.id
-            imported.password = existing.password
-            imported.favorite = existing.favorite
-            imported.tags = existing.tags
-            imported.notes = existing.notes
-            imported.use_count = existing.use_count
-            imported.last_used_at = existing.last_used_at
-        merged_by_id[imported.id] = imported
+            merged = imported.model_copy(update={
+                "id": existing.id,
+                "password": existing.password,
+                "favorite": existing.favorite,
+                "tags": existing.tags,
+                "notes": existing.notes,
+                "use_count": existing.use_count,
+                "last_used_at": existing.last_used_at,
+            })
+        else:
+            merged = imported
+        merged_by_id[merged.id] = merged
 
     return list(merged_by_id.values())
 
@@ -209,18 +191,18 @@ def add_server(
     username: str | None = typer.Option(None, prompt=True),
     use_key: bool = typer.Option(False, "--key", help="Use private key"),
     key_path: str | None = typer.Option(None, help="Path to key"),
-    with_password: bool = typer.Option(False, "--password", help="Save password"),
+    use_password: bool = typer.Option(False, "--password", help="Prompt for password"),
     certificate_path: str | None = typer.Option(None, "--certificate", help="Path to SSH certificate"),
 ):
     """Add a new server."""
     try:
         password = None
-        if with_password:
-            password = typer.prompt("Password (not encrypted)", hide_input=True, confirmation_prompt=True)
+        if use_password:
+            password = typer.prompt("Password", hide_input=True, confirmation_prompt=True) or None
         if use_key and not key_path:
-            default_key = find_default_ssh_key()
+            default_key = find_ssh_key()
             if default_key:
-                key_path = typer.prompt("Path to private key", default=default_key)
+                key_path = typer.prompt("Path to private key", default=str(default_key))
             else:
                 key_path = typer.prompt("Path to private key (e.g. ~/.ssh/id_rsa)")
 
@@ -229,7 +211,7 @@ def add_server(
             host=host,
             port=port,
             username=username,
-            password=password,
+            password=password or None,
             key_path=key_path or None,
             certificate_path=certificate_path or None,
         )
@@ -260,7 +242,7 @@ def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (
 
     try:
         if not typer.confirm(f"Remove '{srv.name}' ({srv.username}@{srv.host}:{srv.port})?"):
-            raise typer.Exit(1)
+            raise typer.Exit(0)
         ok = storage.remove_server(srv.id)
         if ok:
             console.print("[green]Removed.[/green]")
@@ -290,25 +272,44 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
     try:
         name = typer.prompt("Name", default=srv.name)
         host = typer.prompt("Host", default=srv.host)
-        port = typer.prompt("Port", default=str(srv.port))
+        port = typer.prompt("Port", default=srv.port, type=int)
         username = typer.prompt("Username", default=srv.username)
 
-        # Offer current key or default if no key
-        default_key_for_edit = srv.key_path or find_default_ssh_key() or ""
-        key_path = typer.prompt("Key path (empty for none)", default=default_key_for_edit)
-        certificate_path = typer.prompt("Certificate path (empty for none)", default=srv.certificate_path or "")
+        key_path = srv.key_path
+        if srv.key_path:
+            if typer.confirm(f"Change key path? [{srv.key_path}]", default=False):
+                key_path = typer.prompt("New key path (empty to clear)", default="", show_default=False) or None
+        else:
+            if typer.confirm("Add key path?", default=False):
+                key_path = typer.prompt("Key path", show_default=False) or None
 
-        change_pwd = typer.confirm("Change password?", default=False)
+        certificate_path = srv.certificate_path
+        if srv.certificate_path:
+            if typer.confirm(f"Change certificate path? [{srv.certificate_path}]", default=False):
+                certificate_path = (
+                    typer.prompt("New certificate path (empty to clear)", default="", show_default=False) or None
+                )
+        else:
+            if typer.confirm("Add certificate path?", default=False):
+                certificate_path = typer.prompt("Certificate path", show_default=False) or None
+
         password = srv.password
-        if change_pwd:
-            if typer.confirm("Clear password?", default=False):
-                password = None
-            else:
-                password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
+        if srv.password:
+            if typer.confirm("Change password?", default=False):
+                password = typer.prompt(
+                    "New password (empty to clear)",
+                    default="",
+                    hide_input=True,
+                    show_default=False,
+                    confirmation_prompt=True,
+                )
+                password = password or None
+        elif typer.confirm("Add password?", default=False):
+            password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
 
         srv.name = name
         srv.host = host
-        srv.port = int(port)
+        srv.port = port
         srv.username = username
         srv.key_path = key_path or None
         srv.certificate_path = certificate_path or None
@@ -355,7 +356,7 @@ def unpin_server(query: str | None = typer.Argument(None, help="ID/name/partial 
             console.print(
                 "[yellow]No pinned servers found. Pin one with [cyan]better-ssh pin <query>[/cyan].[/yellow]"
             )
-            raise typer.Exit(1)
+            raise typer.Exit(0)
         srv = _select_server(servers, "Select server to unpin:")
     else:
         srv = storage.find_server(query)
@@ -381,22 +382,16 @@ def connect_cmd(
     no_copy: bool = typer.Option(False, help="Don't copy password"),
 ):
     """Connect to a server."""
-    # If no query provided, show interactive selection
+    servers = storage.load_servers()
+    if not servers:
+        _print_no_servers_message()
+        raise typer.Exit(1)
+
     if query is None:
-        servers = storage.load_servers()
-        if not servers:
-            _print_no_servers_message()
-            raise typer.Exit(1)
         srv = _select_server(servers, "Select server to connect:")
     else:
-        # Use query to find server
-        srv = storage.find_server(query)
+        srv = storage.find_server(query, servers)
         if not srv:
-            servers = storage.load_servers()
-            if not servers:
-                _print_no_servers_message()
-                raise typer.Exit(1)
-
             matching_servers = _servers_matching_query(servers, query)
             if matching_servers:
                 srv = _select_server(matching_servers, f"Select server to connect for '{query}':")
@@ -404,7 +399,7 @@ def connect_cmd(
                 srv = _select_server(servers, f"No direct match for '{query}'. Select server to connect:")
 
     rc = connect(srv, copy_password=not no_copy)
-    if rc != 127:
+    if rc in (0, 130):
         storage.record_server_use(srv.id)
     raise typer.Exit(rc)
 
@@ -431,8 +426,13 @@ def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
             console.print("[red]Server not found or has no password[/red]")
             raise typer.Exit(1)
 
-    pyperclip.copy(srv.password)
-    console.print("[green]Password copied.[/green]")
+    try:
+        pyperclip.copy(srv.password)
+        console.print("[green]Password copied.[/green]")
+    except Exception as e:
+        console.print(f"[yellow]Clipboard not available: {e}[/yellow]")
+        console.print(f"Use [cyan]better-ssh show-pass {srv.name}[/cyan] to display the password.")
+        raise typer.Exit(1)
 
 
 @app.command("show-pass", help="Show password. Alias: sp")
@@ -529,7 +529,8 @@ def health_check():
         raise typer.Exit(1)
 
 
-@app.command("encrypt")
+@app.command("encrypt", help="Enable password encryption. Alias: enc")
+@app.command("enc", hidden=True)
 def enable_encryption():
     """Enable password encryption (SSH key based)."""
     # Check current status
@@ -591,7 +592,8 @@ def enable_encryption():
     console.print(f"Encrypted servers: [cyan]{len([s for s in servers if s.password])}[/cyan]")
 
 
-@app.command("decrypt")
+@app.command("decrypt", help="Disable password encryption. Alias: dec")
+@app.command("dec", hidden=True)
 def disable_encryption():
     """Disable password encryption (decrypt all passwords)."""
     if not storage.is_encryption_enabled():
@@ -635,7 +637,8 @@ to anyone with access to your computer.
     console.print("[yellow]Passwords are now stored in plaintext![/yellow]")
 
 
-@app.command("encryption-status")
+@app.command("encryption-status", help="Show encryption status. Alias: es")
+@app.command("es", hidden=True)
 def encryption_status():
     """Show encryption status."""
     enabled = storage.is_encryption_enabled()
@@ -735,12 +738,16 @@ def export_servers(
     servers_to_export = servers
     if not export_plaintext and storage.is_encryption_enabled():
         # Re-encrypt passwords for export
+        salt = storage.get_or_create_encryption_salt()
         servers_to_export = []
         for srv in servers:
             srv_copy = srv.model_copy(deep=True)
             if srv_copy.password:
-                with contextlib.suppress(Exception):
-                    srv_copy.password = encrypt_password(srv_copy.password)
+                try:
+                    srv_copy.password = encrypt_password(srv_copy.password, salt)
+                except Exception as e:
+                    console.print(f"[yellow]Warning: could not re-encrypt password for '{srv.name}': {e}[/yellow]")
+                    console.print("[yellow]This server's password will be exported in plaintext.[/yellow]")
             servers_to_export.append(srv_copy)
 
     # Prepare export data
@@ -749,7 +756,7 @@ def export_servers(
         "exported_from": "better-ssh",
         "encryption_enabled": storage.is_encryption_enabled(),
         "passwords_encrypted": not export_plaintext and storage.is_encryption_enabled(),
-        "servers": [s.model_dump() for s in servers_to_export],
+        "servers": [s.model_dump(mode="json") for s in servers_to_export],
     }
 
     # Write to file

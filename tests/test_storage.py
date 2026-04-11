@@ -10,6 +10,7 @@ from app.models import Server
 from app.storage import (
     find_server,
     get_config_paths,
+    get_or_create_encryption_salt,
     is_encryption_enabled,
     load_servers,
     load_settings,
@@ -37,6 +38,15 @@ def test_load_settings_default(temp_config_dir: Path):
     assert settings == {"encryption_enabled": False}
 
 
+def test_load_settings_corrupt_file_returns_defaults(temp_config_dir: Path):
+    """Test that a corrupt settings.json returns safe defaults instead of crashing."""
+    _, _, settings_file = get_config_paths()
+    settings_file.write_text("not valid json {{{{", encoding="utf-8")
+
+    settings = load_settings()
+    assert settings == {"encryption_enabled": False}
+
+
 def test_save_and_load_settings(temp_config_dir: Path):
     """Test settings persistence."""
     settings = {"encryption_enabled": True, "custom_key": "value"}
@@ -59,8 +69,8 @@ def test_load_servers_empty(temp_config_dir: Path):
     servers = load_servers()
     assert servers == []
 
-    # Should create empty file
-    _, cfg_file, _ = temp_config_dir, temp_config_dir / "servers.json", temp_config_dir / "settings.json"
+    # Should create empty file on first access
+    cfg_file = temp_config_dir / "servers.json"
     assert cfg_file.exists()
 
 
@@ -116,8 +126,9 @@ def test_load_servers_decryption(temp_config_dir: Path, mock_ssh_key: Path):
     """Test servers are decrypted when loaded with encryption enabled."""
     save_settings({"encryption_enabled": True})
 
-    # Manually create encrypted server data
-    encrypted_password = encrypt_password("original_password")
+    # Manually create encrypted server data using the same salt storage will use
+    salt = get_or_create_encryption_salt()
+    encrypted_password = encrypt_password("original_password", salt)
     cfg_file = temp_config_dir / "servers.json"
     data = {
         "version": 1,
@@ -141,6 +152,49 @@ def test_load_servers_decryption(temp_config_dir: Path, mock_ssh_key: Path):
     servers = load_servers()
     assert len(servers) == 1
     assert servers[0].password == "original_password"
+
+
+def test_load_servers_invalid_token_leaves_encrypted(temp_config_dir: Path, mock_ssh_key: Path):
+    """Test that an invalid/corrupted encrypted password is left as-is instead of crashing."""
+    save_settings({"encryption_enabled": True})
+    get_or_create_encryption_salt()  # ensure salt is persisted
+
+    # Craft a value that passes is_encrypted() heuristic but is not a valid token
+    bad_token = "Z0FBQUFB" + "a" * 80
+    cfg_file = temp_config_dir / "servers.json"
+    data = {
+        "version": 1,
+        "servers": [
+            {
+                "id": "test-id",
+                "name": "Server1",
+                "host": "host1",
+                "username": "user1",
+                "password": bad_token,
+                "key_path": None,
+                "tags": [],
+                "notes": None,
+                "port": 22,
+            }
+        ],
+    }
+    cfg_file.write_text(json.dumps(data), encoding="utf-8")
+
+    servers = load_servers()
+    assert len(servers) == 1
+    assert servers[0].password == bad_token  # unchanged, not silently dropped
+
+
+def test_save_servers_encryption_key_missing_saves_plaintext(temp_config_dir: Path, temp_ssh_dir: Path):
+    """Test that if encryption is enabled but SSH key is absent, password is saved as plaintext."""
+    save_settings({"encryption_enabled": True})
+    # temp_ssh_dir is empty — no key present, so encrypt_password will raise RuntimeError
+
+    server = Server(name="S", host="h", username="u", password="my_plaintext")
+    save_servers([server])
+
+    loaded = load_servers()
+    assert loaded[0].password == "my_plaintext"
 
 
 def test_upsert_server_new(temp_config_dir: Path):

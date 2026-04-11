@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 import typer
+from InquirerPy.base.control import Choice as InquirerChoice
 from typer.testing import CliRunner
 
 from app.cli import app
@@ -131,7 +133,7 @@ def test_query_shortcut_ambiguous_match_opens_filtered_menu(
 
     class FakePrompt:
         def execute(self) -> str:
-            return "TestServer1  [admin@192.168.1.10:22 | pwd]"
+            return "test-id-001"
 
     def fake_select(**kwargs):
         assert kwargs["message"] == "Select server to connect for 'TestServer':"
@@ -157,7 +159,7 @@ def test_query_shortcut_no_match_opens_full_menu(cli_with_servers: CliRunner, mo
 
     class FakePrompt:
         def execute(self) -> str:
-            return "TestServer2  [root@192.168.1.20:2222 | key]"
+            return "test-id-002"
 
     def fake_select(**kwargs):
         assert kwargs["message"] == "No direct match for 'missing'. Select server to connect:"
@@ -277,7 +279,7 @@ def test_import_ssh_config_command_merge_preserves_metadata(
     assert imported[0].tags == ["critical"]
     assert imported[0].notes == "Keep this note"
     assert imported[0].use_count == 8
-    assert imported[0].last_used_at == "2026-04-10T09:00:00+00:00"
+    assert imported[0].last_used_at == datetime(2026, 4, 10, 9, 0, tzinfo=UTC)
 
 
 def test_list_command_empty(runner: CliRunner, temp_config_dir: Path):
@@ -304,6 +306,70 @@ def test_list_alias(cli_with_servers: CliRunner):
     assert "TestServer1" in result.stdout
 
 
+def test_add_command_without_password_flag_skips_prompt(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test add without --password flag does not prompt for password."""
+    prompt_calls: list[str] = []
+
+    def fake_prompt(text: str, *args, **kwargs):
+        prompt_calls.append(text)
+        return ""
+
+    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "NewHost", "--host", "10.0.0.10", "--port", "22", "--username", "root"],
+    )
+
+    assert result.exit_code == 0
+    assert "Password" not in prompt_calls
+
+    added = load_servers()
+    assert len(added) == 1
+    assert added[0].name == "NewHost"
+    assert added[0].password is None
+
+
+def test_add_command_password_flag_triggers_prompt(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test add --password triggers a hidden password prompt with confirmation."""
+    prompt_calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_prompt(text: str, *args, **kwargs):
+        prompt_calls.append((text, kwargs))
+        return "secret123"
+
+    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "PwdHost", "--host", "10.0.0.11", "--port", "22", "--username", "root", "--password"],
+    )
+
+    assert result.exit_code == 0
+    assert prompt_calls == [
+        (
+            "Password",
+            {
+                "hide_input": True,
+                "confirmation_prompt": True,
+            },
+        )
+    ]
+
+    added = load_servers()
+    assert len(added) == 1
+    assert added[0].name == "PwdHost"
+    assert added[0].password == "secret123"
+
+
 def test_edit_without_query_opens_interactive_selection(
     cli_with_servers: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
@@ -312,9 +378,9 @@ def test_edit_without_query_opens_interactive_selection(
 
     class FakePrompt:
         def execute(self) -> str:
-            return "TestServer3  [user@example.com:22 | auto]"
+            return "test-id-003"
 
-    answers = iter(["RenamedServer", "example.com", "22", "user", "", ""])
+    answers = iter(["RenamedServer", "example.com", 22, "user"])
 
     monkeypatch.setattr("app.cli.inquirer.select", lambda **kwargs: FakePrompt())
     monkeypatch.setattr("app.cli.typer.prompt", lambda *args, **kwargs: next(answers))
@@ -326,6 +392,94 @@ def test_edit_without_query_opens_interactive_selection(
 
     updated = next(server for server in load_servers() if server.id == "test-id-003")
     assert updated.name == "RenamedServer"
+
+
+def test_edit_no_key_shows_confirm_not_path_prompt(
+    cli_with_servers: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test editing a server without key shows 'Add key path?' confirm, not an open-ended prompt."""
+    prompt_calls: list[str] = []
+    confirm_calls: list[str] = []
+
+    answers = {"Name": "TestServer3", "Host": "example.com", "Port": 22, "Username": "user"}
+
+    def fake_prompt(text: str, *args, **kwargs):
+        prompt_calls.append(text)
+        return answers[text]
+
+    def fake_confirm(text: str, *args, **kwargs):
+        confirm_calls.append(text)
+        return False
+
+    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
+    monkeypatch.setattr("app.cli.typer.confirm", fake_confirm)
+
+    result = cli_with_servers.invoke(app, ["edit", "TestServer3"])
+
+    assert result.exit_code == 0
+    assert confirm_calls == ["Add key path?", "Add certificate path?", "Add password?"]
+    # No key/cert path prompts — user declined via confirm
+    assert not any("path" in p.lower() for p in prompt_calls)
+
+    updated = next(server for server in load_servers() if server.id == "test-id-003")
+    assert updated.key_path is None
+
+
+def test_edit_existing_password_does_not_ask_clear_password(
+    cli_with_servers: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit replaces the old clear-password branch with a single new password prompt."""
+    prompt_values = iter(["TestServer1", "192.168.1.10", 22, "admin", "new-secret"])
+    confirm_calls: list[str] = []
+
+    def fake_prompt(*args, **kwargs):
+        return next(prompt_values)
+
+    def fake_confirm(text: str, *args, **kwargs):
+        confirm_calls.append(text)
+        if text == "Clear password?":
+            raise AssertionError("Clear password prompt should not be shown")
+        return text == "Change password?"
+
+    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
+    monkeypatch.setattr("app.cli.typer.confirm", fake_confirm)
+
+    result = cli_with_servers.invoke(app, ["edit", "TestServer1"])
+
+    assert result.exit_code == 0
+    assert confirm_calls == ["Add key path?", "Add certificate path?", "Change password?"]
+
+    updated = next(server for server in load_servers() if server.id == "test-id-001")
+    assert updated.password == "new-secret"
+
+
+def test_edit_existing_key_path_can_be_cleared(
+    cli_with_servers: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit can clear an already saved key path."""
+    prompt_values = iter(["TestServer2", "192.168.1.20", 2222, "root", ""])
+    confirm_calls: list[str] = []
+
+    def fake_prompt(*args, **kwargs):
+        return next(prompt_values)
+
+    def fake_confirm(text: str, *args, **kwargs):
+        confirm_calls.append(text)
+        return text.startswith("Change key path?")
+
+    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
+    monkeypatch.setattr("app.cli.typer.confirm", fake_confirm)
+
+    result = cli_with_servers.invoke(app, ["edit", "TestServer2"])
+
+    assert result.exit_code == 0
+    assert confirm_calls == ["Change key path? [/home/user/.ssh/id_rsa]", "Add certificate path?", "Add password?"]
+
+    updated = next(server for server in load_servers() if server.id == "test-id-002")
+    assert updated.key_path is None
 
 
 def test_pin_command_marks_server_as_favorite(cli_with_servers: CliRunner):
@@ -351,7 +505,7 @@ def test_unpin_without_query_opens_interactive_selection(
 
     class FakePrompt:
         def execute(self) -> str:
-            return "[pin] TestServer1  [admin@192.168.1.10:22 | pwd]"
+            return "test-id-001"
 
     monkeypatch.setattr("app.cli.inquirer.select", lambda **kwargs: FakePrompt())
 
@@ -373,7 +527,7 @@ def test_root_invocation_interactively_connects_selected_server(
 
     class FakePrompt:
         def execute(self) -> str:
-            return "TestServer2  [root@192.168.1.20:2222 | key]"
+            return "test-id-002"
 
     def fake_select(**kwargs):
         assert kwargs["message"] == "Select server to connect:"
@@ -382,14 +536,14 @@ def test_root_invocation_interactively_connects_selected_server(
     def fake_connect(server, copy_password: bool = True):
         selected["server"] = server
         selected["copy_password"] = copy_password
-        return 23
+        return 0
 
     monkeypatch.setattr("app.cli.inquirer.select", fake_select)
     monkeypatch.setattr("app.cli.connect", fake_connect)
 
     result = cli_with_servers.invoke(app, [])
 
-    assert result.exit_code == 23
+    assert result.exit_code == 0
     assert selected["copy_password"] is True
     assert selected["server"].id == "test-id-002"
 
@@ -443,11 +597,11 @@ def test_root_invocation_sorts_pinned_servers_before_recents(
         ]
     )
 
-    captured_choices: list[str] = []
+    captured_choices: list[InquirerChoice] = []
 
     class FakePrompt:
         def execute(self) -> str:
-            return captured_choices[0]
+            return captured_choices[0].value  # return server ID
 
     def fake_select(**kwargs):
         captured_choices.extend(kwargs["choices"])
@@ -459,10 +613,10 @@ def test_root_invocation_sorts_pinned_servers_before_recents(
     result = runner.invoke(app, [])
 
     assert result.exit_code == 0
-    assert captured_choices[0].startswith("[pin] PinnedNew")
-    assert captured_choices[1].startswith("[pin] PinnedOld")
-    assert captured_choices[2].startswith("Newest")
-    assert captured_choices[3].startswith("OlderRecent")
+    assert captured_choices[0].name.startswith("[pin] PinnedNew")
+    assert captured_choices[1].name.startswith("[pin] PinnedOld")
+    assert captured_choices[2].name.startswith("Newest")
+    assert captured_choices[3].name.startswith("OlderRecent")
 
 
 def test_list_command_sorts_pinned_servers_first(runner: CliRunner, temp_config_dir: Path):
@@ -481,20 +635,104 @@ def test_list_command_sorts_pinned_servers_first(runner: CliRunner, temp_config_
     assert "pin" in result.stdout
 
 
+def test_export_warns_when_reencryption_fails(
+    runner: CliRunner,
+    tmp_path: Path,
+    temp_config_dir: Path,
+    temp_ssh_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test export shows a warning (not silent failure) when re-encryption fails."""
+    save_settings({"encryption_enabled": True})
+    save_servers([Server(name="S", host="h", username="u", password="secret")])
+
+    # Return "Encrypted" mode so the export tries to re-encrypt
+    class FakePrompt:
+        def execute(self) -> str:
+            return "Encrypted - keep passwords encrypted (only works on this machine)"
+
+    monkeypatch.setattr("app.cli.inquirer.select", lambda **kwargs: FakePrompt())
+
+    # No SSH key in temp_ssh_dir → encrypt_password raises RuntimeError → warning shown
+    output_file = str(tmp_path / "export.json")
+    result = runner.invoke(app, ["export", output_file])
+
+    assert result.exit_code == 0
+    assert "Warning" in result.output
+    assert "plaintext" in result.output
+
+
+def test_unpin_no_pinned_servers_exits_cleanly(runner: CliRunner, temp_config_dir: Path):
+    """Test unpin with no pinned servers exits with code 0, not 1."""
+    save_servers([Server(name="S", host="h", username="u")])
+
+    result = runner.invoke(app, ["unpin"])
+
+    assert result.exit_code == 0
+    assert "No pinned servers found" in result.stdout
+
+
+def test_connect_records_use_only_on_success(
+    cli_with_servers: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test connect records server usage on rc=0 and rc=130, but not on other exit codes."""
+    monkeypatch.setattr("app.cli.connect", lambda srv, copy_password=True: 1)
+
+    cli_with_servers.invoke(app, ["connect", "TestServer1"])
+
+    updated = next(s for s in load_servers() if s.id == "test-id-001")
+    assert updated.use_count == 0  # not recorded for rc=1
+
+    monkeypatch.setattr("app.cli.connect", lambda srv, copy_password=True: 130)
+    cli_with_servers.invoke(app, ["connect", "TestServer1"])
+
+    updated = next(s for s in load_servers() if s.id == "test-id-001")
+    assert updated.use_count == 1  # recorded for rc=130
+
+
+def test_remove_cancel_confirmation_exits_cleanly(cli_with_servers: CliRunner, monkeypatch: pytest.MonkeyPatch):
+    """Test that declining the remove confirmation exits with code 0, not 1."""
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *args, **kwargs: False)
+
+    result = cli_with_servers.invoke(app, ["remove", "TestServer1"])
+
+    assert result.exit_code == 0
+    assert len(load_servers()) == 3  # nothing removed
+
+
+def test_copy_pass_clipboard_failure_shows_fallback_message(
+    cli_with_servers: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test copy-pass shows helpful fallback message when clipboard is unavailable."""
+    printed: list[str] = []
+
+    monkeypatch.setattr("app.cli.pyperclip.copy", lambda _: (_ for _ in ()).throw(Exception("no mechanism")))
+    monkeypatch.setattr("app.cli.console.print", lambda m: printed.append(str(m)))
+
+    result = cli_with_servers.invoke(app, ["copy-pass", "TestServer1"])
+
+    assert result.exit_code == 1
+    assert any("Clipboard not available" in m for m in printed)
+    assert any("show-pass" in m for m in printed)
+
+
 def test_encryption_status_disabled(runner: CliRunner, temp_config_dir: Path):
-    """Test encryption-status shows disabled."""
+    """Test encryption-status shows disabled state and plaintext warning."""
     result = runner.invoke(app, ["encryption-status"])
     assert result.exit_code == 0
-    assert "disabled" in result.stdout.lower() or "not enabled" in result.stdout.lower()
+    assert "Encryption disabled" in result.stdout
+    assert "plaintext" in result.stdout
 
 
 def test_encryption_status_enabled(runner: CliRunner, temp_config_dir: Path, mock_ssh_key: Path):
-    """Test encryption-status shows enabled."""
+    """Test encryption-status shows enabled state."""
     save_settings({"encryption_enabled": True})
 
     result = runner.invoke(app, ["encryption-status"])
     assert result.exit_code == 0
-    assert "enabled" in result.stdout.lower()
+    assert "Encryption enabled" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -512,17 +750,20 @@ def test_encryption_status_enabled(runner: CliRunner, temp_config_dir: Path, moc
         ("export", "ex"),
         ("import", "im"),
         ("import-ssh-config", "isc"),
+        ("encrypt", "enc"),
+        ("decrypt", "dec"),
+        ("encryption-status", "es"),
     ],
 )
 def test_command_aliases_work(runner: CliRunner, command: str, alias: str):
-    """Test that all command aliases invoke help successfully."""
-    # Test main command
+    """Test that aliases are documented in the main command and both are invokable."""
     result_main = runner.invoke(app, [command, "--help"])
-    assert result_main.exit_code == 0
-
-    # Test alias
     result_alias = runner.invoke(app, [alias, "--help"])
+
+    assert result_main.exit_code == 0
     assert result_alias.exit_code == 0
+    # Main command help must document its alias — catches renames and missing docs
+    assert f"Alias: {alias}" in result_main.stdout
 
 
 def test_commands_alphabetically_ordered(runner: CliRunner):
