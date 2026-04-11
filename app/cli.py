@@ -13,7 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import storage
-from .encryption import encrypt_password, find_ssh_key, find_ssh_key_for_encryption
+from .encryption import encrypt_password, find_ssh_key, find_ssh_key_for_encryption, is_encrypted
 from .models import Server
 from .ssh import check_server_availability, connect
 from .ssh_config import get_default_ssh_config_path, import_ssh_config
@@ -409,12 +409,12 @@ def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
     # If no query provided, show interactive selection
     if query is None:
         servers = storage.load_servers()
-        servers_with_pwd = [s for s in servers if s.password]
+        servers_with_pwd = [s for s in servers if s.password and not is_encrypted(s.password)]
         if not servers_with_pwd:
             if not servers:
                 _print_no_servers_message()
             else:
-                console.print("[yellow]No servers with saved passwords.[/yellow]")
+                console.print("[yellow]No servers with accessible passwords.[/yellow]")
             raise typer.Exit(1)
         srv = _select_server(servers_with_pwd, "Select server to copy password:")
     else:
@@ -424,12 +424,17 @@ def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
             console.print("[red]Server not found or has no password[/red]")
             raise typer.Exit(1)
 
+    if is_encrypted(srv.password):
+        console.print("[red]Password could not be decrypted.[/red]")
+        console.print("Your SSH key may be missing or changed. Check with [cyan]bssh es[/cyan].")
+        raise typer.Exit(1)
+
     try:
         pyperclip.copy(srv.password)
         console.print("[green]Password copied.[/green]")
     except Exception as e:
         console.print(f"[yellow]Clipboard not available: {e}[/yellow]")
-        console.print(f"Use [cyan]better-ssh show-pass {srv.name}[/cyan] to display the password.")
+        console.print(f"Use [cyan]bssh show-pass {srv.name}[/cyan] to display the password.")
         raise typer.Exit(1)
 
 
@@ -440,12 +445,12 @@ def show_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
     # If no query provided, show interactive selection
     if query is None:
         servers = storage.load_servers()
-        servers_with_pwd = [s for s in servers if s.password]
+        servers_with_pwd = [s for s in servers if s.password and not is_encrypted(s.password)]
         if not servers_with_pwd:
             if not servers:
                 _print_no_servers_message()
             else:
-                console.print("[yellow]No servers with saved passwords.[/yellow]")
+                console.print("[yellow]No servers with accessible passwords.[/yellow]")
             raise typer.Exit(1)
         srv = _select_server(servers_with_pwd, "Select server to show password:")
     else:
@@ -454,6 +459,11 @@ def show_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
         if not srv or not srv.password:
             console.print("[red]Server not found or has no password[/red]")
             raise typer.Exit(1)
+
+    if is_encrypted(srv.password):
+        console.print("[red]Password could not be decrypted.[/red]")
+        console.print("Your SSH key may be missing or changed. Check with [cyan]bssh es[/cyan].")
+        raise typer.Exit(1)
 
     console.print(f"[bold]{srv.password}[/bold]")
 

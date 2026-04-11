@@ -12,8 +12,9 @@ from InquirerPy.base.control import Choice as InquirerChoice
 from typer.testing import CliRunner
 
 from app.cli import app
+from app.encryption import encrypt_password
 from app.models import Server
-from app.storage import load_servers, save_servers, save_settings
+from app.storage import get_or_create_encryption_salt, load_servers, save_servers, save_settings
 
 
 @pytest.fixture
@@ -663,6 +664,46 @@ def test_export_warns_when_reencryption_fails(
     assert result.exit_code == 0
     assert "Warning" in result.output
     assert "plaintext" in result.output
+
+
+def test_copy_pass_shows_error_when_decryption_failed(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    mock_ssh_key: Path,
+):
+    """Test copy-pass shows an error instead of copying an encrypted string."""
+    # Save a server with a valid encrypted password
+    save_settings({"encryption_enabled": True})
+    salt = get_or_create_encryption_salt()
+    encrypted = encrypt_password("secret", salt)
+    save_servers([Server(id="s1", name="S", host="h", username="u", password=encrypted)])
+
+    # Now change the salt so decryption will fail — simulates key/salt mismatch
+    save_settings({"encryption_enabled": True, "encryption_salt": "bm90LXRoZS1yZWFsLXNhbHQ="})
+
+    result = runner.invoke(app, ["copy-pass", "S"])
+
+    assert result.exit_code == 1
+    assert "could not be decrypted" in result.output
+
+
+def test_show_pass_shows_error_when_decryption_failed(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    mock_ssh_key: Path,
+):
+    """Test show-pass shows an error instead of printing an encrypted string."""
+    save_settings({"encryption_enabled": True})
+    salt = get_or_create_encryption_salt()
+    encrypted = encrypt_password("secret", salt)
+    save_servers([Server(id="s1", name="S", host="h", username="u", password=encrypted)])
+
+    save_settings({"encryption_enabled": True, "encryption_salt": "bm90LXRoZS1yZWFsLXNhbHQ="})
+
+    result = runner.invoke(app, ["show-pass", "S"])
+
+    assert result.exit_code == 1
+    assert "could not be decrypted" in result.output
 
 
 def test_unpin_no_pinned_servers_exits_cleanly(runner: CliRunner, temp_config_dir: Path):
