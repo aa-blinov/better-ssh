@@ -38,9 +38,7 @@ class OrderCommands(typer.core.TyperGroup):
 
 app = typer.Typer(
     help="Better SSH: quick server selection, connection and password management.",
-    epilog=(
-        "Quick start: better-ssh; better-ssh <query>; better-ssh import-ssh-config"
-    ),
+    epilog=("Quick start: better-ssh; better-ssh <query>; better-ssh import-ssh-config"),
     cls=OrderCommands,
     rich_markup_mode="rich",
     pretty_exceptions_show_locals=False,
@@ -131,15 +129,17 @@ def _merge_servers_by_name(existing_servers: list[Server], imported_servers: lis
     for imported in imported_servers:
         existing = existing_by_name.get(imported.name.lower())
         if existing:
-            merged = imported.model_copy(update={
-                "id": existing.id,
-                "password": existing.password,
-                "favorite": existing.favorite,
-                "tags": existing.tags,
-                "notes": existing.notes,
-                "use_count": existing.use_count,
-                "last_used_at": existing.last_used_at,
-            })
+            merged = imported.model_copy(
+                update={
+                    "id": existing.id,
+                    "password": existing.password,
+                    "favorite": existing.favorite,
+                    "tags": existing.tags,
+                    "notes": existing.notes,
+                    "use_count": existing.use_count,
+                    "last_used_at": existing.last_used_at,
+                }
+            )
         else:
             merged = imported
         merged_by_id[merged.id] = merged
@@ -353,9 +353,7 @@ def unpin_server(query: str | None = typer.Argument(None, help="ID/name/partial 
     if query is None:
         servers = [server for server in storage.load_servers() if server.favorite]
         if not servers:
-            console.print(
-                "[yellow]No pinned servers found. Pin one with [cyan]better-ssh pin <query>[/cyan].[/yellow]"
-            )
+            console.print("[yellow]No pinned servers found. Pin one with [cyan]better-ssh pin <query>[/cyan].[/yellow]")
             raise typer.Exit(0)
         srv = _select_server(servers, "Select server to unpin:")
     else:

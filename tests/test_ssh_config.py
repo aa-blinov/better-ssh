@@ -18,20 +18,11 @@ def test_collect_host_aliases_reads_explicit_hosts_and_includes(temp_ssh_dir: Pa
     included_file = include_dir / "extra.conf"
 
     config_file.write_text(
-        "Host prod stage\n"
-        "  HostName example.com\n"
-        "Include config.d/*.conf\n"
-        "Host *\n"
-        "  User ignored",
+        "Host prod stage\n  HostName example.com\nInclude config.d/*.conf\nHost *\n  User ignored",
         encoding="utf-8",
     )
     included_file.write_text(
-        "Host db\n"
-        "  HostName db.internal\n"
-        "Host *.wildcard\n"
-        "  User ignored\n"
-        "Host !negated\n"
-        "  User ignored",
+        "Host db\n  HostName db.internal\nHost *.wildcard\n  User ignored\nHost !negated\n  User ignored",
         encoding="utf-8",
     )
 
@@ -65,29 +56,11 @@ def test_import_ssh_config_resolves_identity_files(
             "identityfile ~/.ssh/work_ed25519\n"
             "certificatefile ~/.ssh/work_ed25519-cert.pub"
         ),
-        "db": (
-            "host db\n"
-            "hostname 10.0.0.10\n"
-            "user postgres\n"
-            "port 22\n"
-            "identityfile ~/.ssh/id_ed25519"
-        ),
+        "db": ("host db\nhostname 10.0.0.10\nuser postgres\nport 22\nidentityfile ~/.ssh/id_ed25519"),
     }
     default_outputs = {
-        "prod": (
-            "host prod\n"
-            "hostname prod.example.com\n"
-            "user deploy\n"
-            "port 2222\n"
-            "identityfile ~/.ssh/id_ed25519"
-        ),
-        "db": (
-            "host db\n"
-            "hostname 10.0.0.10\n"
-            "user postgres\n"
-            "port 22\n"
-            "identityfile ~/.ssh/id_ed25519"
-        ),
+        "prod": ("host prod\nhostname prod.example.com\nuser deploy\nport 2222\nidentityfile ~/.ssh/id_ed25519"),
+        "db": ("host db\nhostname 10.0.0.10\nuser postgres\nport 22\nidentityfile ~/.ssh/id_ed25519"),
     }
 
     def fake_run(command, check, capture_output, text):
