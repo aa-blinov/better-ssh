@@ -57,23 +57,25 @@ git clone https://github.com/aa-blinov/better-ssh.git
 cd better-ssh
 ```
 
-2. Install dependencies:
+2. Install as a global tool:
 
 ```bash
-uv tool install -e .
+uv tool install .
 ```
 
 3. Verify installation:
 
 ```bash
-better-ssh --help
+bssh --help
 ```
+
+Both `bssh` and `better-ssh` are registered as entry points and work identically.
 
 For development instead of a global install:
 
 ```bash
 uv sync
-uv run better-ssh --help
+uv run bssh --help
 ```
 
 ### SSH Client Installation
@@ -95,13 +97,13 @@ winget install --id Microsoft.OpenSSH.Client -e
 Install shell completion for your current shell:
 
 ```bash
-better-ssh --install-completion
+bssh --install-completion
 ```
 
 Preview the completion script without installing it:
 
 ```bash
-better-ssh --show-completion
+bssh --show-completion
 ```
 
 **macOS:**
@@ -130,59 +132,59 @@ sudo pacman -S openssh
 ### Quick Start
 
 ```bash
-better-ssh
-better-ssh <query>
-better-ssh import-ssh-config
+bssh
+bssh <query>
+bssh import-ssh-config
 ```
 
-- `better-ssh` opens the interactive connect menu immediately
-- `better-ssh <query>` connects directly when the match is unique
-- `better-ssh import-ssh-config` bootstraps your saved hosts from `~/.ssh/config`
+- `bssh` opens the interactive connect menu immediately
+- `bssh <query>` connects directly when the match is unique
+- `bssh import-ssh-config` bootstraps your saved hosts from `~/.ssh/config`
 
 ### Available Commands
 
 ```text
-Usage: better-ssh [OPTIONS] COMMAND [ARGS]...
+Usage: bssh [OPTIONS] COMMAND [ARGS]...
 
 Better SSH: quick server selection, connection and password management.
 
 Commands:
-  add                 Add a new server. Alias: a
-  connect             Connect to a server. Alias: c
-  copy-pass           Copy password to clipboard. Alias: cp
-  decrypt             Disable password encryption (decrypt all passwords).
-  edit                Edit a server. Alias: e
-  encrypt             Enable password encryption (SSH key based).
-  encryption-status   Show encryption status.
-  export              Export servers to JSON file. Alias: ex
+  add                 Add a new server.              Alias: a
+  connect             Connect to a server.           Alias: c
+  copy-pass           Copy password to clipboard.    Alias: cp
+  decrypt             Disable password encryption.   Alias: dec
+  edit                Edit a server.                 Alias: e
+  encrypt             Enable password encryption.    Alias: enc
+  encryption-status   Show encryption status.        Alias: es
+  export              Export servers to JSON file.   Alias: ex
   health              Check all servers availability. Alias: h
   import              Import servers from JSON file. Alias: im
-  import-ssh-config   Import hosts from SSH config. Alias: isc
-  list                Show list of servers. Alias: ls
+  import-ssh-config   Import hosts from SSH config.  Alias: isc
+  list                Show list of servers.          Alias: ls
   pin                 Pin a server to the top of lists.
-  ping                Check server availability. Alias: p
-  remove              Remove a server. Alias: rm
-  show-pass           Show password. Alias: sp
+  ping                Check server availability.     Alias: p
+  remove              Remove a server.               Alias: rm
+  show-pass           Show password.                 Alias: sp
   unpin               Remove a server from pinned favorites.
 ```
 
-Run `better-ssh` without a subcommand to open the interactive connect menu immediately.
+Run `bssh` without a subcommand to open the interactive connect menu immediately.
 
-Run `better-ssh <query>` to connect directly when the match is unique. If the query is ambiguous or missing, the tool falls back to an interactive menu.
+Run `bssh <query>` to connect directly when the match is unique. If the query is ambiguous or missing, the tool falls back to an interactive menu.
 
-Use `better-ssh pin <query>` to keep critical hosts above the normal recent/frequent ordering, and `better-ssh unpin <query>` to remove them from favorites.
+Use `bssh pin <query>` to keep critical hosts above the normal recent/frequent ordering, and `bssh unpin <query>` to remove them from favorites.
 
 Most commands work without arguments and will present an interactive menu.
 
-`better-ssh add` prompts for a password by default. Press `Enter` on the password prompt to skip it and add the password later with `better-ssh edit`.
+To add a server with a password use `bssh add --password`. Without the flag no password is stored — add one later with `bssh edit`.
 
-For password-based hosts, `better-ssh` copies the saved password to your clipboard before starting OpenSSH. You still paste it into the SSH password prompt manually; the password is not injected into the `ssh` command automatically.
+For password-based hosts, `bssh` copies the saved password to your clipboard before starting OpenSSH. You still paste it into the SSH password prompt manually; the password is not injected into the `ssh` command automatically.
 
 For detailed help on any command, use `--help`:
 
 ```bash
-better-ssh connect --help
-better-ssh add --help
+bssh connect --help
+bssh add --help
 ```
 
 ### Importing From SSH Config
@@ -270,13 +272,13 @@ By default, passwords are stored in plaintext. The application offers optional e
 
 ```bash
 # Check encryption status
-uv run better-ssh encryption-status
+bssh es
 
 # Enable encryption (interactive)
-uv run better-ssh encrypt
+bssh enc
 
 # Disable encryption (interactive)
-uv run better-ssh decrypt
+bssh dec
 ```
 
 When exporting servers, you can choose to export passwords in plaintext or encrypted format through an interactive prompt.
