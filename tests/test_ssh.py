@@ -19,6 +19,7 @@ from app.ssh import (
 # has_ssh
 # ---------------------------------------------------------------------------
 
+
 def test_has_ssh_when_present(monkeypatch):
     """Test SSH client detection when it exists on PATH."""
     monkeypatch.setattr("app.ssh.shutil.which", lambda _: "/usr/bin/ssh")
@@ -34,6 +35,7 @@ def test_has_ssh_when_absent(monkeypatch):
 # ---------------------------------------------------------------------------
 # _paste_hint
 # ---------------------------------------------------------------------------
+
 
 def test_paste_hint_macos(monkeypatch):
     """Test macOS paste hint uses Cmd+V."""
@@ -53,6 +55,7 @@ def test_paste_hint_linux(monkeypatch):
 # ---------------------------------------------------------------------------
 # _clipboard_failure_message
 # ---------------------------------------------------------------------------
+
 
 def test_clipboard_failure_message_linux_suggests_clipboard_tools(monkeypatch):
     """Test Linux clipboard failure message lists wl-clipboard, xclip, xsel."""
@@ -74,6 +77,7 @@ def test_clipboard_failure_message_non_linux_only_show_pass(monkeypatch):
 # ---------------------------------------------------------------------------
 # connect — no SSH client
 # ---------------------------------------------------------------------------
+
 
 def test_connect_no_ssh_returns_127(monkeypatch):
     """Test connect returns exit code 127 when SSH client is missing."""
@@ -122,8 +126,10 @@ def test_connect_no_ssh_windows_suggests_winget(monkeypatch):
 # connect — subprocess errors
 # ---------------------------------------------------------------------------
 
+
 def test_connect_keyboard_interrupt_returns_130(monkeypatch):
     """Test that Ctrl+C during SSH session returns exit code 130."""
+
     def raise_interrupt(_cmd):
         raise KeyboardInterrupt
 
@@ -153,6 +159,7 @@ def test_connect_subprocess_error_returns_1(monkeypatch):
 # ---------------------------------------------------------------------------
 # connect — existing tests kept intact
 # ---------------------------------------------------------------------------
+
 
 def test_connect_uses_plain_ssh_without_explicit_key(monkeypatch):
     """Test OpenSSH defaults are left untouched when no key is pinned."""
@@ -250,6 +257,7 @@ def test_connect_clipboard_failure_shows_linux_specific_fallback(monkeypatch):
 # check_server_availability
 # ---------------------------------------------------------------------------
 
+
 class _MockSocket:
     """Socket stub that returns a fixed connect_ex result or raises an exception."""
 
@@ -258,7 +266,8 @@ class _MockSocket:
         self._connect_raises = connect_raises
         self.connected_to: tuple | None = None
 
-    def settimeout(self, _timeout): pass
+    def settimeout(self, _timeout):
+        pass
 
     def connect_ex(self, addr):
         self.connected_to = addr
@@ -266,7 +275,8 @@ class _MockSocket:
             raise self._connect_raises
         return self._connect_result
 
-    def close(self): pass
+    def close(self):
+        pass
 
 
 def test_check_availability_reachable(monkeypatch):
@@ -286,9 +296,7 @@ def test_check_availability_port_closed(monkeypatch):
     """Test that a refused connection is reported as port closed."""
     monkeypatch.setattr("app.ssh.socket.socket", lambda *a, **kw: _MockSocket(connect_result=111))
 
-    available, msg, elapsed = check_server_availability(
-        Server(name="s", host="prod.example.com", username="u")
-    )
+    available, msg, elapsed = check_server_availability(Server(name="s", host="prod.example.com", username="u"))
 
     assert available is False
     assert msg == "port closed"
@@ -302,9 +310,7 @@ def test_check_availability_dns_error(monkeypatch):
         lambda *a, **kw: _MockSocket(connect_raises=socket.gaierror("Name or service not known")),
     )
 
-    available, msg, elapsed = check_server_availability(
-        Server(name="s", host="nonexistent.invalid", username="u")
-    )
+    available, msg, elapsed = check_server_availability(Server(name="s", host="nonexistent.invalid", username="u"))
 
     assert available is False
     assert msg == "DNS error"
@@ -318,9 +324,7 @@ def test_check_availability_timeout(monkeypatch):
         lambda *a, **kw: _MockSocket(connect_raises=TimeoutError()),
     )
 
-    available, msg, elapsed = check_server_availability(
-        Server(name="s", host="10.255.255.1", username="u")
-    )
+    available, msg, elapsed = check_server_availability(Server(name="s", host="10.255.255.1", username="u"))
 
     assert available is False
     assert msg == "timeout"
@@ -334,9 +338,7 @@ def test_check_availability_unexpected_error(monkeypatch):
         lambda *a, **kw: _MockSocket(connect_raises=OSError("network unreachable")),
     )
 
-    available, msg, elapsed = check_server_availability(
-        Server(name="s", host="h", username="u")
-    )
+    available, msg, elapsed = check_server_availability(Server(name="s", host="h", username="u"))
 
     assert available is False
     assert "network unreachable" in msg
