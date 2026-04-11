@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -44,8 +45,10 @@ def test_help_shows_completion_options(runner: CliRunner):
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "--install-completion" in result.stdout
-    assert "--show-completion" in result.stdout
+    # Strip ANSI codes: Rich splits option names with color escapes on some terminals
+    stdout = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    assert "--install-completion" in stdout
+    assert "--show-completion" in stdout
 
 
 def test_root_invocation_opens_connect_flow(runner: CliRunner, monkeypatch: pytest.MonkeyPatch):
