@@ -80,7 +80,7 @@ uv run bssh --help
 
 ### SSH Client Installation
 
-The tool requires a system SSH client. Installation instructions vary by platform:
+The tool requires a system SSH client.
 
 **Windows:**
 
@@ -90,20 +90,6 @@ Settings -> Apps -> Optional Features -> OpenSSH Client
 
 # Via winget
 winget install --id Microsoft.OpenSSH.Client -e
-```
-
-### Shell Completion
-
-Install shell completion for your current shell:
-
-```bash
-bssh --install-completion
-```
-
-Preview the completion script without installing it:
-
-```bash
-bssh --show-completion
 ```
 
 **macOS:**
@@ -125,6 +111,13 @@ sudo dnf install openssh-clients
 
 # Arch Linux
 sudo pacman -S openssh
+```
+
+### Shell Completion
+
+```bash
+bssh --install-completion   # install for current shell
+bssh --show-completion      # preview without installing
 ```
 
 ## Usage
@@ -149,22 +142,22 @@ Usage: bssh [OPTIONS] COMMAND [ARGS]...
 Better SSH: quick server selection, connection and password management.
 
 Commands:
-  add                 Add a new server.              Alias: a
-  connect             Connect to a server.           Alias: c
-  copy-pass           Copy password to clipboard.    Alias: cp
-  decrypt             Disable password encryption.   Alias: dec
-  edit                Edit a server.                 Alias: e
-  encrypt             Enable password encryption.    Alias: enc
-  encryption-status   Show encryption status.        Alias: es
-  export              Export servers to JSON file.   Alias: ex
+  add                 Add a new server.               Alias: a
+  connect             Connect to a server.            Alias: c
+  copy-pass           Copy password to clipboard.     Alias: cp
+  decrypt             Disable password encryption.    Alias: dec
+  edit                Edit a server.                  Alias: e
+  encrypt             Enable password encryption.     Alias: enc
+  encryption-status   Show encryption status.         Alias: es
+  export              Export servers to JSON file.    Alias: ex
   health              Check all servers availability. Alias: h
-  import              Import servers from JSON file. Alias: im
-  import-ssh-config   Import hosts from SSH config.  Alias: isc
-  list                Show list of servers.          Alias: ls
+  import              Import servers from JSON file.  Alias: im
+  import-ssh-config   Import hosts from SSH config.   Alias: isc
+  list                Show list of servers.           Alias: ls
   pin                 Pin a server to the top of lists.
-  ping                Check server availability.     Alias: p
-  remove              Remove a server.               Alias: rm
-  show-pass           Show password.                 Alias: sp
+  ping                Check server availability.      Alias: p
+  remove              Remove a server.                Alias: rm
+  show-pass           Show password.                  Alias: sp
   unpin               Remove a server from pinned favorites.
 ```
 
@@ -192,18 +185,18 @@ bssh add --help
 Import hosts from your OpenSSH config:
 
 ```bash
-better-ssh import-ssh-config
+bssh isc
 ```
 
 Or import from a custom path:
 
 ```bash
-better-ssh import-ssh-config ~/.ssh/work-config
+bssh isc ~/.ssh/work-config
 ```
 
 The importer resolves each host through `ssh -G`, so `Host *`, `Include`, explicit `IdentityFile`, and explicit `CertificateFile` are reflected in imported entries.
 
-Default OpenSSH keys remain implicit. If a host works with plain `ssh host` because of default keys or `ssh-agent`, `better-ssh` will keep using that behavior without pinning a key path unless your SSH config explicitly does so.
+Default OpenSSH keys remain implicit. If a host works with plain `ssh host` because of default keys or `ssh-agent`, `bssh` will keep using that behavior without pinning a key path unless your SSH config explicitly does so.
 
 ### Server Identification
 
@@ -217,52 +210,14 @@ Servers can be identified by:
 
 Configuration files are stored in platform-specific directories:
 
-- **Windows:** `%LOCALAPPDATA%\better-ssh\` (typically `C:\Users\username\AppData\Local\better-ssh\`)
+- **Windows:** `%LOCALAPPDATA%\better-ssh\`
 - **macOS:** `~/Library/Application Support/better-ssh/`
 - **Linux:** `~/.config/better-ssh/`
 
 ### Configuration Files
 
-- `servers.json` - Server configurations and encrypted passwords
-- `settings.json` - Application settings (encryption status, key source)
-
-## Requirements
-
-- Python 3.12+ (installed automatically via uv)
-- System `ssh` client
-
-### Installing SSH Client
-
-**Windows:**
-
-```powershell
-# Via Windows Features
-Settings -> Apps -> Optional Features -> OpenSSH Client
-
-# Or via winget
-winget install --id Microsoft.OpenSSH.Client -e
-```
-
-**macOS:**
-
-SSH is pre-installed. If needed:
-
-```bash
-brew install openssh
-```
-
-**Linux:**
-
-```bash
-# Ubuntu/Debian
-sudo apt install openssh-client
-
-# Fedora/RHEL
-sudo dnf install openssh-clients
-
-# Arch Linux
-sudo pacman -S openssh
-```
+- `servers.json` — server configurations and encrypted passwords
+- `settings.json` — application settings (encryption status, key source, salt)
 
 ## Password Encryption
 
@@ -271,27 +226,22 @@ By default, passwords are stored in plaintext. The application offers optional e
 ### Managing Encryption
 
 ```bash
-# Check encryption status
-bssh es
-
-# Enable encryption (interactive)
-bssh enc
-
-# Disable encryption (interactive)
-bssh dec
+bssh es    # check encryption status
+bssh enc   # enable encryption (interactive)
+bssh dec   # disable encryption (interactive)
 ```
 
 When exporting servers, you can choose to export passwords in plaintext or encrypted format through an interactive prompt.
 
 ### How It Works
 
-The encryption system uses your SSH private key (`~/.ssh/id_ed25519` or `id_rsa`) to derive an encryption key via PBKDF2-HMAC-SHA256 with 100,000 iterations. Passwords are encrypted using Fernet (symmetric encryption) and stored in base64 format.
+The encryption system uses your SSH private key (`~/.ssh/id_ed25519` or `id_rsa`) to derive an encryption key via PBKDF2-HMAC-SHA256 with 100,000 iterations and a random per-installation salt stored in `settings.json`. Passwords are encrypted using Fernet (symmetric encryption) and stored in base64 format.
 
 ### Important Considerations
 
 - **Key Dependency:** If you delete or modify your SSH key, encrypted passwords become inaccessible
-- **Machine Specific:** Decryption requires the same SSH key on the same machine
-- **Backup Recommended:** Back up your SSH key before enabling encryption
+- **Machine Specific:** Decryption requires the same SSH key and salt on the same machine
+- **Backup Recommended:** Back up your SSH key and `settings.json` before enabling encryption
 - **Automatic Operation:** Passwords are automatically encrypted on save and decrypted on load
 
 ### Security Properties
@@ -299,29 +249,13 @@ The encryption system uses your SSH private key (`~/.ssh/id_ed25519` or `id_rsa`
 - Passwords remain protected if the `servers.json` file is compromised
 - No master password required for daily use
 - SSH key protected by operating system file permissions
-- Encryption key derived deterministically from SSH key content
+- Random per-installation salt prevents precomputed key attacks
 
 ## Platform Support
-
-### Supported Operating Systems
 
 - Windows 10/11
 - macOS 10.15+
 - Linux (any distribution with Python 3.12+)
-
-### Platform-Specific Details
-
-**Configuration Directory:**
-
-- Windows: `%LOCALAPPDATA%\better-ssh\`
-- macOS: `~/Library/Application Support/better-ssh/`
-- Linux: `~/.config/better-ssh/`
-
-**SSH Key Location:**
-
-All platforms use the standard `~/.ssh/` directory for SSH keys.
-
-**Dependencies:**
 
 All Python dependencies are cross-platform. The only external requirement is a system SSH client, which is typically pre-installed on macOS and Linux.
 
@@ -349,46 +283,26 @@ Contributions are welcome. Please follow these guidelines:
 - Follow PEP 8 style guidelines
 - Use type hints for function signatures
 - Write docstrings for public functions and classes
-- Run linting: `uv run ruff check app`
-- Format code: `uv run ruff format app`
+- Run linting: `uv run ruff check app tests`
+- Format code: `uv run ruff format app tests`
 - Ensure all checks pass before submitting
 
 ### Testing
 
-The project includes comprehensive test coverage using pytest:
-
 ```bash
-# Run all tests
-uv run pytest
-
-# Run with verbose output
-uv run pytest -v
-
-# Run specific test file
-uv run pytest tests/test_models.py
-
-# Run with coverage report
-uv run pytest --cov=app --cov-report=html
-
-# View HTML coverage report
-# Open htmlcov/index.html in browser
+uv run pytest                                    # run all tests
+uv run pytest -v                                 # verbose output
+uv run pytest tests/test_models.py              # specific file
+uv run pytest --cov=app --cov-report=html       # with coverage report
 ```
 
 **Test Structure:**
 
-- `tests/test_models.py` - Server model tests
-- `tests/test_encryption.py` - Encryption/decryption tests
-- `tests/test_storage.py` - Configuration persistence tests
-- `tests/test_cli.py` - CLI commands and interface tests
-
-When adding new features:
-
-- Write tests for new functionality
-- Maintain test coverage above 80%
-- Test on multiple platforms if possible
-- Verify SSH client compatibility
-- Test encryption/decryption functionality
-- Check interactive menu behavior
+- `tests/test_models.py` — Server model tests
+- `tests/test_encryption.py` — Encryption/decryption tests
+- `tests/test_storage.py` — Configuration persistence tests
+- `tests/test_ssh.py` — SSH command and availability tests
+- `tests/test_cli.py` — CLI commands and interface tests
 
 ### Submitting Changes
 
