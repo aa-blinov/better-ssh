@@ -671,14 +671,13 @@ def test_copy_pass_shows_error_when_decryption_failed(
     temp_config_dir: Path,
     mock_ssh_key: Path,
 ):
-    """Test copy-pass shows an error instead of copying an encrypted string."""
-    # Save a server with a valid encrypted password
+    """Test copy-pass shows an error when encryption is on but decryption fails (wrong salt)."""
     save_settings({"encryption_enabled": True})
     salt = get_or_create_encryption_salt()
     encrypted = encrypt_password("secret", salt)
     save_servers([Server(id="s1", name="S", host="h", username="u", password=encrypted)])
 
-    # Now change the salt so decryption will fail — simulates key/salt mismatch
+    # Corrupt salt → decryption will fail silently → password stays encrypted
     save_settings({"encryption_enabled": True, "encryption_salt": "bm90LXRoZS1yZWFsLXNhbHQ="})
 
     result = runner.invoke(app, ["copy-pass", "S"])
@@ -692,7 +691,7 @@ def test_show_pass_shows_error_when_decryption_failed(
     temp_config_dir: Path,
     mock_ssh_key: Path,
 ):
-    """Test show-pass shows an error instead of printing an encrypted string."""
+    """Test show-pass shows an error when encryption is on but decryption fails (wrong salt)."""
     save_settings({"encryption_enabled": True})
     salt = get_or_create_encryption_salt()
     encrypted = encrypt_password("secret", salt)
@@ -704,6 +703,45 @@ def test_show_pass_shows_error_when_decryption_failed(
 
     assert result.exit_code == 1
     assert "could not be decrypted" in result.output
+
+
+def test_copy_pass_shows_error_when_encrypted_but_disabled(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    mock_ssh_key: Path,
+):
+    """Test copy-pass shows helpful error when password is encrypted but encryption is disabled."""
+    save_settings({"encryption_enabled": True})
+    salt = get_or_create_encryption_salt()
+    encrypted = encrypt_password("secret", salt)
+    save_servers([Server(id="s1", name="S", host="h", username="u", password=encrypted)])
+
+    # Disable encryption without decrypting — inconsistent state
+    save_settings({"encryption_enabled": False})
+
+    result = runner.invoke(app, ["copy-pass", "S"])
+
+    assert result.exit_code == 1
+    assert "encrypted but encryption is disabled" in result.output
+
+
+def test_show_pass_shows_error_when_encrypted_but_disabled(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    mock_ssh_key: Path,
+):
+    """Test show-pass shows helpful error when password is encrypted but encryption is disabled."""
+    save_settings({"encryption_enabled": True})
+    salt = get_or_create_encryption_salt()
+    encrypted = encrypt_password("secret", salt)
+    save_servers([Server(id="s1", name="S", host="h", username="u", password=encrypted)])
+
+    save_settings({"encryption_enabled": False})
+
+    result = runner.invoke(app, ["show-pass", "S"])
+
+    assert result.exit_code == 1
+    assert "encrypted but encryption is disabled" in result.output
 
 
 def test_unpin_no_pinned_servers_exits_cleanly(runner: CliRunner, temp_config_dir: Path):

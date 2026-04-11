@@ -409,12 +409,12 @@ def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
     # If no query provided, show interactive selection
     if query is None:
         servers = storage.load_servers()
-        servers_with_pwd = [s for s in servers if s.password and not is_encrypted(s.password)]
+        servers_with_pwd = [s for s in servers if s.password]
         if not servers_with_pwd:
             if not servers:
                 _print_no_servers_message()
             else:
-                console.print("[yellow]No servers with accessible passwords.[/yellow]")
+                console.print("[yellow]No servers with saved passwords.[/yellow]")
             raise typer.Exit(1)
         srv = _select_server(servers_with_pwd, "Select server to copy password:")
     else:
@@ -425,8 +425,12 @@ def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
             raise typer.Exit(1)
 
     if is_encrypted(srv.password):
-        console.print("[red]Password could not be decrypted.[/red]")
-        console.print("Your SSH key may be missing or changed. Check with [cyan]bssh es[/cyan].")
+        if storage.is_encryption_enabled():
+            console.print("[red]Password could not be decrypted. SSH key may be missing or changed.[/red]")
+            console.print("Check encryption status: [cyan]bssh es[/cyan]")
+        else:
+            console.print("[red]Password is encrypted but encryption is disabled.[/red]")
+            console.print("Re-enable and then properly disable: [cyan]bssh enc[/cyan] → [cyan]bssh dec[/cyan]")
         raise typer.Exit(1)
 
     try:
@@ -445,12 +449,12 @@ def show_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
     # If no query provided, show interactive selection
     if query is None:
         servers = storage.load_servers()
-        servers_with_pwd = [s for s in servers if s.password and not is_encrypted(s.password)]
+        servers_with_pwd = [s for s in servers if s.password]
         if not servers_with_pwd:
             if not servers:
                 _print_no_servers_message()
             else:
-                console.print("[yellow]No servers with accessible passwords.[/yellow]")
+                console.print("[yellow]No servers with saved passwords.[/yellow]")
             raise typer.Exit(1)
         srv = _select_server(servers_with_pwd, "Select server to show password:")
     else:
@@ -461,8 +465,12 @@ def show_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
             raise typer.Exit(1)
 
     if is_encrypted(srv.password):
-        console.print("[red]Password could not be decrypted.[/red]")
-        console.print("Your SSH key may be missing or changed. Check with [cyan]bssh es[/cyan].")
+        if storage.is_encryption_enabled():
+            console.print("[red]Password could not be decrypted. SSH key may be missing or changed.[/red]")
+            console.print("Check encryption status: [cyan]bssh es[/cyan]")
+        else:
+            console.print("[red]Password is encrypted but encryption is disabled.[/red]")
+            console.print("Re-enable and then properly disable: [cyan]bssh enc[/cyan] → [cyan]bssh dec[/cyan]")
         raise typer.Exit(1)
 
     console.print(f"[bold]{srv.password}[/bold]")
