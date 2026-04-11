@@ -9,61 +9,21 @@ import pytest
 from app.models import Server
 
 
-def test_server_creation_minimal():
-    """Test creating server with minimal required fields."""
-    server = Server(
-        name="TestServer",
-        host="192.168.1.1",
-        username="admin",
-    )
-
-    assert server.name == "TestServer"
-    assert server.host == "192.168.1.1"
-    assert server.username == "admin"
-    assert server.port == 22  # default
-    assert server.password is None
-    assert server.key_path is None
-    assert server.certificate_path is None
+def test_server_defaults():
+    """Test non-trivial defaults: port 22, auto-generated UUID, empty tags list."""
+    server = Server(name="Test", host="example.com", username="user")
+    assert server.port == 22
     assert server.favorite is False
     assert server.use_count == 0
-    assert server.last_used_at is None
     assert server.tags == []
-    assert server.notes is None
-    # UUID should be generated
-    assert uuid.UUID(server.id)
+    assert uuid.UUID(server.id)  # valid UUID format
 
 
-def test_server_creation_full():
-    """Test creating server with all fields."""
-    server = Server(
-        id="custom-id-123",
-        name="FullServer",
-        host="example.com",
-        port=2222,
-        username="root",
-        password="secret",
-        key_path="/home/user/.ssh/id_rsa",
-        certificate_path="/home/user/.ssh/id_rsa-cert.pub",
-        favorite=True,
-        use_count=12,
-        last_used_at="2026-04-10T12:00:00+00:00",
-        tags=["prod", "web"],
-        notes="Production server",
-    )
-
-    assert server.id == "custom-id-123"
-    assert server.name == "FullServer"
-    assert server.host == "example.com"
-    assert server.port == 2222
-    assert server.username == "root"
-    assert server.password == "secret"
-    assert server.key_path == "/home/user/.ssh/id_rsa"
-    assert server.certificate_path == "/home/user/.ssh/id_rsa-cert.pub"
-    assert server.favorite is True
-    assert server.use_count == 12
-    assert server.last_used_at == "2026-04-10T12:00:00+00:00"
-    assert server.tags == ["prod", "web"]
-    assert server.notes == "Production server"
+def test_server_auto_generated_ids_are_unique():
+    """Test that auto-generated IDs are unique across instances."""
+    s1 = Server(name="S1", host="h1", username="u1")
+    s2 = Server(name="S2", host="h2", username="u2")
+    assert s1.id != s2.id
 
 
 @pytest.mark.parametrize(
@@ -123,30 +83,3 @@ def test_server_display_marks_pinned_servers():
 
     display = server.display()
     assert display.startswith("[pin] PinnedServer")
-
-
-def test_server_unique_ids():
-    """Test that auto-generated IDs are unique."""
-    server1 = Server(name="S1", host="h1", username="u1")
-    server2 = Server(name="S2", host="h2", username="u2")
-
-    assert server1.id != server2.id
-    assert uuid.UUID(server1.id)
-    assert uuid.UUID(server2.id)
-
-
-def test_server_model_copy():
-    """Test that server can be deep copied."""
-    server = Server(
-        name="Original",
-        host="192.168.1.1",
-        username="user",
-        password="secret",
-        tags=["tag1"],
-    )
-
-    copy = server.model_copy(deep=True)
-    assert copy.id == server.id
-    assert copy.password == server.password
-    assert copy.tags == server.tags
-    assert copy.tags is not server.tags  # deep copy

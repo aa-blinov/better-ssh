@@ -174,6 +174,10 @@ Use `better-ssh pin <query>` to keep critical hosts above the normal recent/freq
 
 Most commands work without arguments and will present an interactive menu.
 
+`better-ssh add` prompts for a password by default. Press `Enter` on the password prompt to skip it and add the password later with `better-ssh edit`.
+
+For password-based hosts, `better-ssh` copies the saved password to your clipboard before starting OpenSSH. You still paste it into the SSH password prompt manually; the password is not injected into the `ssh` command automatically.
+
 For detailed help on any command, use `--help`:
 
 ```bash

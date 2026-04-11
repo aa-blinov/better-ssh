@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.fernet import InvalidToken
 from platformdirs import user_config_dir
 
 from .encryption import decrypt_password, encrypt_password, is_encrypted
@@ -44,6 +48,18 @@ def is_encryption_enabled() -> bool:
     return load_settings().get("encryption_enabled", False)
 
 
+def get_or_create_encryption_salt() -> bytes:
+    """Get or create a unique per-installation encryption salt stored in settings."""
+    settings = load_settings()
+    salt_b64 = settings.get("encryption_salt")
+    if salt_b64:
+        return base64.b64decode(salt_b64)
+    salt = os.urandom(32)
+    settings["encryption_salt"] = base64.b64encode(salt).decode("ascii")
+    save_settings(settings)
+    return salt
+
+
 def load_servers() -> list[Server]:
     """Load servers, auto-decrypting passwords if encryption is enabled."""
     _, cfg_file, _ = get_config_paths()
@@ -56,11 +72,11 @@ def load_servers() -> list[Server]:
 
     # Decrypt passwords if encryption is enabled
     if is_encryption_enabled():
+        salt = get_or_create_encryption_salt()
         for server in servers:
             if server.password and is_encrypted(server.password):
-                # If decryption fails, leave as is
-                with contextlib.suppress(Exception):
-                    server.password = decrypt_password(server.password)
+                with contextlib.suppress(InvalidToken, InvalidSignature, ValueError):
+                    server.password = decrypt_password(server.password, salt)
 
     return servers
 
@@ -72,19 +88,19 @@ def save_servers(servers: list[Server]) -> None:
     # Encrypt passwords if encryption is enabled
     servers_to_save = []
     if is_encryption_enabled():
+        salt = get_or_create_encryption_salt()
         for server in servers:
             server_copy = server.model_copy(deep=True)
             if server_copy.password and not is_encrypted(server_copy.password):
-                # If encryption fails, save as is
-                with contextlib.suppress(Exception):
-                    server_copy.password = encrypt_password(server_copy.password)
+                with contextlib.suppress(RuntimeError, ValueError):
+                    server_copy.password = encrypt_password(server_copy.password, salt)
             servers_to_save.append(server_copy)
     else:
         servers_to_save = servers
 
     payload = {
         "version": 1,
-        "servers": [s.model_dump() for s in servers_to_save],
+        "servers": [s.model_dump(mode="json") for s in servers_to_save],
     }
     cfg_dir.mkdir(parents=True, exist_ok=True)
     cfg_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -111,12 +127,11 @@ def remove_server(server_id: str) -> bool:
 def record_server_use(server_id: str) -> bool:
     """Update usage metadata for a server after a connection attempt."""
     servers = load_servers()
-    used_at = datetime.now(UTC).isoformat()
 
     for server in servers:
         if server.id == server_id:
             server.use_count += 1
-            server.last_used_at = used_at
+            server.last_used_at = datetime.now(UTC)
             save_servers(servers)
             return True
 
@@ -136,9 +151,10 @@ def set_server_favorite(server_id: str, favorite: bool) -> bool:
     return False
 
 
-def find_server(query: str) -> Server | None:
+def find_server(query: str, servers: list[Server] | None = None) -> Server | None:
     """Find server by ID/prefix, exact name, or partial name match."""
-    servers = load_servers()
+    if servers is None:
+        servers = load_servers()
     # exact id
     for s in servers:
         if s.id == query:

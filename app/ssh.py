@@ -19,6 +19,27 @@ def has_ssh() -> bool:
     return shutil.which("ssh") is not None
 
 
+def _paste_hint() -> str:
+    """Return a platform-appropriate paste hint for terminal prompts."""
+    system = platform.system()
+    if system == "Windows":
+        return "paste with Ctrl+Shift+V or right-click"
+    if system == "Darwin":
+        return "paste with Cmd+V"
+    return "paste from clipboard using your terminal shortcut"
+
+
+def _clipboard_failure_message(error: Exception) -> str:
+    """Return a user-facing clipboard failure message with a practical fallback."""
+    base_message = f"[yellow]Failed to copy password: {error}[/yellow]"
+    if platform.system() == "Linux":
+        return (
+            f"{base_message} Install [cyan]wl-clipboard[/cyan], [cyan]xclip[/cyan], or [cyan]xsel[/cyan], "
+            "or use [cyan]better-ssh show-pass[/cyan]."
+        )
+    return f"{base_message} Use [cyan]better-ssh show-pass[/cyan] if needed."
+
+
 def connect(server: Server, copy_password: bool = True) -> int:
     """Connect to SSH server. Returns exit code."""
     if not has_ssh():
@@ -45,9 +66,9 @@ def connect(server: Server, copy_password: bool = True) -> int:
     if copy_password and server.password:
         try:
             pyperclip.copy(server.password)
-            console.print("[green]Password copied to clipboard.[/green] When prompted for Password: paste with Ctrl+V.")
+            console.print(f"[green]Password copied to clipboard.[/green] When prompted for Password: {_paste_hint()}.")
         except Exception as e:
-            console.print(f"[yellow]Failed to copy password: {e}[/yellow]")
+            console.print(_clipboard_failure_message(e))
 
     cmd = ["ssh", "-p", str(server.port)]
     if server.key_path:

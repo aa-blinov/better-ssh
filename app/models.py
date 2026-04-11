@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +19,7 @@ class Server(BaseModel):
     certificate_path: str | None = None
     favorite: bool = False
     use_count: int = 0
-    last_used_at: str | None = None
+    last_used_at: datetime | None = None
     tags: list[str] = Field(default_factory=list)
     notes: str | None = None
 
