@@ -63,7 +63,7 @@ def _paste_hint() -> str:
 
 def _clipboard_failure_message(error: Exception) -> str:
     """Return a user-facing clipboard failure message with a practical fallback."""
-    base_message = f"[yellow]Failed to copy password: {error}[/yellow]"
+    base_message = f"[yellow]Failed to copy password: {escape(str(error))}[/yellow]"
     if platform.system() == "Linux":
         return (
             f"{base_message} Install [cyan]wl-clipboard[/cyan], [cyan]xclip[/cyan], or [cyan]xsel[/cyan], "
