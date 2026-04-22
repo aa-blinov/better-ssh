@@ -8,10 +8,11 @@ from pathlib import Path
 
 import pytest
 import typer
+from click import IntRange
 from InquirerPy.base.control import Choice as InquirerChoice
 from typer.testing import CliRunner
 
-from app.cli import _NONE_JUMP_SENTINEL, app
+from app.cli import _NONE_JUMP_SENTINEL, _prompt_keep_alive_interval, app
 from app.encryption import encrypt_password
 from app.models import Server
 from app.storage import get_or_create_encryption_salt, load_servers, save_servers, save_settings
@@ -429,7 +430,7 @@ def test_add_command_confirms_keep_alive_stores_interval(
 
     def fake_prompt(text: str, *a, **kw):
         prompts.append(text)
-        if text == "Interval in seconds":
+        if text.startswith("Interval in seconds"):
             return 120
         return ""
 
@@ -445,24 +446,25 @@ def test_add_command_confirms_keep_alive_stores_interval(
     )
 
     assert result.exit_code == 0
-    assert "Interval in seconds" in prompts
+    assert any(p.startswith("Interval in seconds") for p in prompts)
     added = next(s for s in load_servers() if s.name == "Alive")
     assert added.keep_alive_interval == 120
 
 
-def test_edit_can_disable_existing_keep_alive(
+def test_edit_can_disable_existing_keep_alive_with_zero(
     runner: CliRunner,
     temp_config_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Test edit can turn off keep-alive on a server that already has it set."""
+    """Test edit disables keep-alive when user enters 0 at the interval prompt."""
     save_servers([Server(id="k-1", name="Alive", host="a.example", username="u", keep_alive_interval=60)])
 
-    prompt_values = iter(["Alive", "a.example", 22, "u"])
+    # Name, Host, Port, Username, then 0 for interval (disable)
+    prompt_values = iter(["Alive", "a.example", 22, "u", 0])
     monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
     monkeypatch.setattr(
         "app.cli.typer.confirm",
-        lambda text, **kw: text.startswith(("Change keep-alive interval?", "Disable keep-alive?")),
+        lambda text, **kw: text.startswith("Change keep-alive interval?"),
     )
 
     result = runner.invoke(app, ["edit", "Alive"])
@@ -470,6 +472,56 @@ def test_edit_can_disable_existing_keep_alive(
     assert result.exit_code == 0
     updated = next(s for s in load_servers() if s.id == "k-1")
     assert updated.keep_alive_interval is None
+
+
+def test_add_command_keep_alive_zero_stores_none(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test add: entering 0 at the keep-alive interval prompt stores None, not 0."""
+
+    def fake_prompt(text: str, *a, **kw):
+        if text.startswith("Interval in seconds"):
+            return 0
+        return ""
+
+    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: text == "Enable SSH keep-alive?",
+    )
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Noop", "--host", "n.example", "--port", "22", "--username", "u"],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "Noop")
+    assert added.keep_alive_interval is None
+
+
+def test_prompt_keep_alive_interval_uses_int_range_validator(monkeypatch: pytest.MonkeyPatch):
+    """Test the helper passes click.IntRange(min=0) to reject negative values at prompt."""
+    captured: dict[str, object] = {}
+
+    def fake_prompt(text, *, default, type):  # noqa: A002 - mirrors typer.prompt signature
+        captured["text"] = text
+        captured["default"] = default
+        captured["type"] = type
+        return 60
+
+    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
+
+    result = _prompt_keep_alive_interval(30)
+
+    assert result == 60
+    assert captured["default"] == 30
+    # click.IntRange should enforce min=0 so typer/click rejects negatives at prompt
+    validator = captured["type"]
+    assert isinstance(validator, IntRange)
+    assert validator.min == 0
 
 
 def test_list_hides_notes_column_when_no_notes(
