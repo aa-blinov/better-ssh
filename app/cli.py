@@ -246,8 +246,10 @@ def _select_server(servers: list[Server], message: str) -> Server:
 def _servers_matching_query(servers: list[Server], query: str) -> list[Server]:
     """Return servers that loosely match the provided query.
 
-    Matches against name, host, username, id prefix, and tags (all
-    case-insensitive substrings except id which uses prefix).
+    Matches against name, host, username, id prefix, tags, and jump_host
+    (all case-insensitive substrings except id which uses prefix). Matching
+    by jump_host surfaces both a bastion server and its dependents under one
+    search term.
     """
     normalized_query = query.lower()
     return [
@@ -258,6 +260,7 @@ def _servers_matching_query(servers: list[Server], query: str) -> list[Server]:
         or normalized_query in server.username.lower()
         or server.id.startswith(query)
         or any(normalized_query in tag.lower() for tag in server.tags)
+        or (server.jump_host and normalized_query in server.jump_host.lower())
     ]
 
 
@@ -345,9 +348,17 @@ def add_server(
         None,
         "--keep-alive",
         "-K",
-        help="Enable SSH keep-alive with interval in seconds (0 to skip)",
+        help="SSH keep-alive interval in seconds (0 to disable)",
         min=0,
     ),
+    key: str | None = typer.Option(None, "--key", help="Path to SSH private key"),
+    certificate: str | None = typer.Option(None, "--certificate", help="Path to SSH certificate"),
+    password_flag: str | None = typer.Option(
+        None,
+        "--password",
+        help="Password (WARNING: visible in shell history; prefer interactive prompt)",
+    ),
+    note: str | None = typer.Option(None, "--notes", help="Free-form note attached to the server"),
 ):
     """Add a new server."""
     try:
@@ -362,15 +373,21 @@ def add_server(
                 raise typer.Exit(1)
 
         key_path: str | None = None
-        if typer.confirm("Add SSH key?", default=False):
+        if key is not None:
+            key_path = key or None
+        elif typer.confirm("Add SSH key?", default=False):
             default_key = find_ssh_key()
             if default_key:
                 key_path = typer.prompt("Path to private key", default=str(default_key)) or None
             else:
                 key_path = typer.prompt("Path to private key (e.g. ~/.ssh/id_rsa)") or None
 
+        certificate_path: str | None = certificate or None
+
         password: str | None = None
-        if typer.confirm("Add password?", default=False):
+        if password_flag is not None:
+            password = password_flag or None
+        elif typer.confirm("Add password?", default=False):
             password = typer.prompt("Password", hide_input=True, confirmation_prompt=True) or None
 
         jump_host: str | None = None
@@ -391,7 +408,9 @@ def add_server(
             )
 
         notes: str | None = None
-        if typer.confirm("Add a note?", default=False):
+        if note is not None:
+            notes = note or None
+        elif typer.confirm("Add a note?", default=False):
             notes = typer.prompt("Note") or None
 
         keep_alive_interval: int | None = None
@@ -408,6 +427,7 @@ def add_server(
             username=username,
             password=password,
             key_path=key_path,
+            certificate_path=certificate_path,
             jump_host=jump_host,
             notes=notes,
             keep_alive_interval=keep_alive_interval,
