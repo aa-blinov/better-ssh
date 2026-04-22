@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pyperclip
 import typer
+from rich.markup import escape
 
 from .. import storage
 from ..domain import servers_matching_query
@@ -83,7 +84,7 @@ def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
         console.print("[green]Password copied.[/green]")
     except Exception as e:
         console.print(f"[yellow]Clipboard not available: {e}[/yellow]")
-        console.print(f"Use [cyan]bssh show-pass {srv.name}[/cyan] to display the password.")
+        console.print(f"Use [cyan]bssh show-pass {escape(srv.name)}[/cyan] to display the password.")
         raise typer.Exit(1)
 
 

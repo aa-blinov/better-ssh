@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 from InquirerPy import inquirer
+from rich.markup import escape
 
 from .. import storage
 from ..domain import auth_label
@@ -82,7 +83,9 @@ def export_servers(
                 try:
                     srv_copy.password = encrypt_password(srv_copy.password, salt)
                 except Exception as e:
-                    console.print(f"[yellow]Warning: could not re-encrypt password for '{srv.name}': {e}[/yellow]")
+                    console.print(
+                        f"[yellow]Warning: could not re-encrypt password for '{escape(srv.name)}': {e}[/yellow]"
+                    )
                     console.print("[yellow]This server's password will be exported in plaintext.[/yellow]")
             servers_to_export.append(srv_copy)
 
@@ -137,7 +140,9 @@ def import_servers(
 
     console.print(f"\n[bold]Found {len(imported_servers)} server(s) to import:[/bold]")
     for srv in imported_servers:
-        console.print(f"  - {srv.name} ({srv.username}@{srv.host}:{srv.port}) [{auth_label(srv)}]")
+        console.print(
+            f"  - {escape(srv.name)} ({escape(srv.username)}@{escape(srv.host)}:{srv.port}) [{auth_label(srv)}]"
+        )
 
     existing_servers = storage.load_servers()
     merge_mode = False
@@ -212,7 +217,9 @@ def import_ssh_config_cmd(
 
     console.print(f"\n[bold]Found {len(imported_servers)} SSH host(s) in:[/bold] {config_path}")
     for srv in imported_servers:
-        console.print(f"  - {srv.name} ({srv.username}@{srv.host}:{srv.port}) [{auth_label(srv)}]")
+        console.print(
+            f"  - {escape(srv.name)} ({escape(srv.username)}@{escape(srv.host)}:{srv.port}) [{auth_label(srv)}]"
+        )
 
     existing_servers = storage.load_servers()
     merge_mode = True

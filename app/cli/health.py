@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typer
+from rich.markup import escape
 from rich.table import Table
 
 from .. import storage
@@ -26,10 +27,10 @@ def ping_server(query: str | None = typer.Argument(None, help="ID/name/partial n
             console.print("[red]Server not found[/red]")
             raise typer.Exit(1)
 
-    console.print(f"Checking [bold]{srv.name}[/bold] ({srv.host}:{srv.port})...")
+    console.print(f"Checking [bold]{escape(srv.name)}[/bold] ({escape(srv.host)}:{srv.port})...")
     is_available, message, response_time = check_server_availability(srv)
 
-    connection = f"{srv.username}@{srv.host}:{srv.port}"
+    connection = escape(f"{srv.username}@{srv.host}:{srv.port}")
     if is_available:
         console.print(f"{connection} - [green]{message}[/green] [dim]({response_time:.0f}ms)[/dim]")
     else:
@@ -64,8 +65,8 @@ def health_check():
             status_style = "red"
 
         table.add_row(
-            srv.name,
-            f"{srv.username}@{srv.host}:{srv.port}",
+            escape(srv.name),
+            escape(f"{srv.username}@{srv.host}:{srv.port}"),
             f"[{status_style}]{message}[/{status_style}] [dim]({response_time:.0f}ms)[/dim]",
         )
 

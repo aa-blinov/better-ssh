@@ -1214,6 +1214,64 @@ def test_list_hides_fwd_column_when_no_forwards(
     assert "Fwd" not in result.stdout
 
 
+def test_view_renders_server_with_bracketed_name_without_crashing(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh view` treats names/notes with square brackets as literal text.
+
+    Before the Rich-markup-escape pass a name like "[red]evil[/red]" would be
+    parsed as markup by Rich and either break layout or hide the brackets
+    entirely. Escaping makes them render verbatim.
+    """
+    save_servers(
+        [
+            Server(
+                id="e-1",
+                name="[red]evil[/red]",
+                host="h.example",
+                username="u",
+                notes="has [bold]brackets[/bold] inside",
+                tags=["[weird]"],
+            )
+        ]
+    )
+
+    result = runner.invoke(app, ["view", "e-1"])
+
+    assert result.exit_code == 0
+    # The literal brackets must remain visible in the output
+    assert "[red]evil[/red]" in result.stdout
+    assert "[bold]brackets[/bold]" in result.stdout
+    assert "[weird]" in result.stdout
+
+
+def test_list_renders_bracketed_server_name_literally(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh ls` shows a name containing square brackets verbatim."""
+    save_servers([Server(id="e-1", name="[hostile]name", host="h.example", username="u")])
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    assert "[hostile]name" in result.stdout
+
+
+def test_pin_renders_bracketed_name_literally(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test pin echo message does not mangle a name with square brackets."""
+    save_servers([Server(id="e-1", name="[weird]server", host="h.example", username="u")])
+
+    result = runner.invoke(app, ["pin", "[weird]server"])
+
+    assert result.exit_code == 0
+    assert "[weird]server" in result.stdout
+
+
 def test_view_shows_forwards_section(
     runner: CliRunner,
     temp_config_dir: Path,
