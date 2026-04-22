@@ -310,6 +310,39 @@ def test_list_alias(cli_with_servers: CliRunner):
     assert "TestServer1" in result.stdout
 
 
+def test_list_filters_by_query_name_substring(cli_with_servers: CliRunner):
+    """Test `ls <query>` filters servers by name substring (case-insensitive)."""
+    result = cli_with_servers.invoke(app, ["ls", "server1"])
+    assert result.exit_code == 0
+    assert "TestServer1" in result.stdout
+    assert "TestServer2" not in result.stdout
+    assert "TestServer3" not in result.stdout
+
+
+def test_list_filters_by_query_matches_host(cli_with_servers: CliRunner):
+    """Test `ls <query>` matches server host."""
+    result = cli_with_servers.invoke(app, ["ls", "example.com"])
+    assert result.exit_code == 0
+    assert "TestServer3" in result.stdout
+    assert "TestServer1" not in result.stdout
+
+
+def test_list_filters_by_query_matches_tag(cli_with_servers: CliRunner):
+    """Test `ls <query>` matches server tags."""
+    result = cli_with_servers.invoke(app, ["ls", "prod"])
+    assert result.exit_code == 0
+    assert "TestServer1" in result.stdout  # has tag "prod"
+    assert "TestServer2" not in result.stdout  # has tag "dev"
+    assert "TestServer3" not in result.stdout
+
+
+def test_list_filters_by_query_no_matches_shows_message(cli_with_servers: CliRunner):
+    """Test `ls <query>` with no matches prints a friendly message."""
+    result = cli_with_servers.invoke(app, ["ls", "doesnotexist"])
+    assert result.exit_code == 0
+    assert "No servers match 'doesnotexist'" in result.stdout
+
+
 def test_add_command_declines_key_and_password(
     runner: CliRunner,
     temp_config_dir: Path,

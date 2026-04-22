@@ -220,7 +220,11 @@ def _select_server(servers: list[Server], message: str) -> Server:
 
 
 def _servers_matching_query(servers: list[Server], query: str) -> list[Server]:
-    """Return servers that loosely match the provided query."""
+    """Return servers that loosely match the provided query.
+
+    Matches against name, host, username, id prefix, and tags (all
+    case-insensitive substrings except id which uses prefix).
+    """
     normalized_query = query.lower()
     return [
         server
@@ -229,6 +233,7 @@ def _servers_matching_query(servers: list[Server], query: str) -> list[Server]:
         or normalized_query in server.host.lower()
         or normalized_query in server.username.lower()
         or server.id.startswith(query)
+        or any(normalized_query in tag.lower() for tag in server.tags)
     ]
 
 
@@ -282,14 +287,25 @@ def root(ctx: typer.Context) -> None:
     connect_cmd(query=None, no_copy=False)
 
 
-@app.command("list", help="Show list of servers. Alias: ls")
+@app.command("list", help="Show list of servers. Alias: ls. Optional query filters by name/host/user/tag.")
 @app.command("ls", hidden=True)
-def list_servers() -> None:
-    """Show list of servers."""
+def list_servers(
+    query: str | None = typer.Argument(None, help="Filter servers by name, host, username, tag, or id prefix"),
+) -> None:
+    """Show list of servers (optionally filtered by query)."""
     servers = storage.load_servers()
     if not servers:
         _print_no_servers_message()
         return
+
+    if query:
+        matching = _servers_matching_query(servers, query)
+        if not matching:
+            console.print(f"[yellow]No servers match '{query}'.[/yellow]")
+            return
+        _print_servers(matching)
+        return
+
     _print_servers(servers)
 
 
