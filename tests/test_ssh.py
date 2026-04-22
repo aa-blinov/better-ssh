@@ -576,6 +576,28 @@ def test_connect_emits_all_forwards_in_order(monkeypatch):
     assert cmd[d_index + 1] == "1080"
 
 
+def test_connect_adds_x11_flag_when_x11_forwarding_enabled(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(name="gui", host="gui.example", username="u", x11_forwarding=True)
+    connect(server, copy_password=False)
+
+    assert "-X" in commands[0]
+
+
+def test_connect_omits_x11_flag_when_disabled(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(name="cli", host="cli.example", username="u")
+    connect(server, copy_password=False)
+
+    assert "-X" not in commands[0]
+
+
 def test_connect_without_forwards_does_not_emit_forward_flags(monkeypatch):
     commands: list[list[str]] = []
     monkeypatch.setattr("app.ssh.has_ssh", lambda: True)

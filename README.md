@@ -41,6 +41,7 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - ProxyJump support — connect through a bastion host (or a chain of hosts)
 - Optional SSH keep-alive per server (ServerAliveInterval)
 - Per-server port forwarding presets (local `-L`, remote `-R`, dynamic SOCKS `-D`)
+- Optional X11 forwarding per server (`ssh -X`)
 - Free-form notes and tags attached to each server
 - Detailed per-server card view (`bssh view <name>`)
 - Time-sorted "recents" list (`bssh recent`) with a relative `Last used` column
@@ -241,6 +242,7 @@ Flag reference:
 | `-L <spec>` | — | Local forward, repeatable: `-L [bind:]port:host:port` |
 | `-R <spec>` | — | Remote forward, repeatable: `-R [bind:]port:host:port` |
 | `-D <spec>` | — | Dynamic SOCKS forward, repeatable: `-D [bind:]port` |
+| `--x11` | — | Enable X11 forwarding (`ssh -X`) |
 
 Passing an empty string (`--key ""`, `--notes ""`) stores `None` — useful when a script wants to be explicit about clearing a field.
 
@@ -257,6 +259,8 @@ bssh edit prod --host 10.0.0.9
 ```
 
 Empty-string clearing works here too: `--jump ""` drops the ProxyJump, `--notes ""` wipes the note, etc.
+
+Boolean toggles use Typer's `--x11/--no-x11` syntax on `bssh edit`: pass `--x11` to enable, `--no-x11` to disable, or omit both to keep the current value.
 
 ### Server Notes, Tags, and Keep-Alive
 
