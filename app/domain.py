@@ -144,7 +144,7 @@ def check_jump_cycle(servers: list[Server], server: Server) -> str | None:
     while current:
         if current in seen:
             chain.append(current)
-            return f"Jump host cycle detected: {' → '.join(chain)}"
+            return f"Jump host cycle detected: {' -> '.join(chain)}"
         jump = by_name.get(current)
         if jump is None:
             return f"Jump host '{current}' not found in saved servers"

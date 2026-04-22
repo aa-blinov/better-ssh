@@ -228,8 +228,8 @@ def _prompt_forwards_interactively() -> list[Forward]:
             kind = inquirer.select(
                 message="Add a port forward?",
                 choices=[
-                    Choice(value="local", name="Local  -L  (port → remote host:port)"),
-                    Choice(value="remote", name="Remote -R  (remote port → local host:port)"),
+                    Choice(value="local", name="Local  -L  (port -> remote host:port)"),
+                    Choice(value="remote", name="Remote -R  (remote port -> local host:port)"),
                     Choice(value="dynamic", name="Dynamic -D  (SOCKS proxy on local port)"),
                     Choice(value="__done__", name="(done)"),
                 ],
