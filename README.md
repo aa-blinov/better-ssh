@@ -170,8 +170,8 @@ Commands:
   decrypt             Disable password encryption.    Alias: dec
   edit                Edit a server.                  Alias: e
   encrypt             Enable password encryption.     Alias: enc
-  exec                Run a command on one or more servers in parallel.
   encryption-status   Show encryption status.         Alias: es
+  exec                Run a command on one or more servers in parallel.
   export              Export servers to JSON file.    Alias: ex
   export-ssh-config   Export servers to SSH config.   Alias: esc
   get                 Download a remote file/dir (scp).
