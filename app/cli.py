@@ -61,6 +61,7 @@ def _print_no_servers_message() -> None:
 def _print_servers(servers: list[Server]) -> None:
     """Print servers table."""
     show_via = any(s.jump_host for s in servers)
+    show_notes = any(s.notes for s in servers)
     table = Table(title="Servers")
     table.add_column("ID", style="dim", no_wrap=True)
     table.add_column("Pin", justify="center", no_wrap=True)
@@ -69,12 +70,16 @@ def _print_servers(servers: list[Server]) -> None:
     table.add_column("Auth", justify="center", no_wrap=True)
     if show_via:
         table.add_column("Via", style="cyan", no_wrap=True)
+    if show_notes:
+        table.add_column("Notes", style="dim", max_width=40, overflow="ellipsis")
 
     for s in _sort_servers(servers):
         auth = _auth_label(s)
         row = [s.id[:8], _favorite_label(s), s.name, f"{s.username}@{s.host}:{s.port}", auth]
         if show_via:
             row.append(s.jump_host or "")
+        if show_notes:
+            row.append(s.notes or "")
         table.add_row(*row)
 
     console.print(table)
@@ -359,6 +364,10 @@ def add_server(
                 all_servers=existing_servers,
             )
 
+        notes: str | None = None
+        if typer.confirm("Add a note?", default=False):
+            notes = typer.prompt("Note") or None
+
         server = Server(
             name=name,
             host=host,
@@ -367,6 +376,7 @@ def add_server(
             password=password,
             key_path=key_path,
             jump_host=jump_host,
+            notes=notes,
         )
 
         error = _check_jump_cycle(existing_servers, server)
@@ -528,6 +538,13 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
                 all_servers=all_servers,
             )
 
+        notes = srv.notes
+        if srv.notes:
+            if typer.confirm(f"Change note? [{srv.notes[:40]}{'...' if len(srv.notes) > 40 else ''}]", default=False):
+                notes = typer.prompt("New note (empty to clear)", default="", show_default=False) or None
+        elif typer.confirm("Add a note?", default=False):
+            notes = typer.prompt("Note") or None
+
         old_name = srv.name
         srv.name = name
         srv.host = host
@@ -537,6 +554,7 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         srv.certificate_path = certificate_path or None
         srv.password = password
         srv.jump_host = jump_host
+        srv.notes = notes
 
         # Validate the prospective jump chain before saving
         prospective = [s if s.id != srv.id else srv for s in all_servers]
