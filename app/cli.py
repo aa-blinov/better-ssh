@@ -15,7 +15,7 @@ from rich.table import Table
 from . import storage
 from .encryption import decrypt_password, encrypt_password, find_ssh_key, find_ssh_key_for_encryption, is_encrypted
 from .models import Server
-from .ssh import check_server_availability, connect
+from .ssh import JumpResolutionError, check_server_availability, connect, resolve_jump_chain
 from .ssh_config import get_default_ssh_config_path, import_ssh_config
 
 
@@ -476,6 +476,87 @@ def add_server(
     except (KeyboardInterrupt, typer.Abort):
         console.print("\n[dim]Cancelled.[/dim]")
         raise typer.Exit(0)
+
+
+@app.command("view", help="Show a detailed card for one server. Alias: v")
+@app.command("v", hidden=True)
+def view(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+    """Show a detailed card for one server."""
+    all_servers = storage.load_servers()
+    if not all_servers:
+        _print_no_servers_message()
+        raise typer.Exit(1)
+
+    if query is None:
+        srv = _select_server(all_servers, "Select server to view:")
+    else:
+        srv = storage.find_server(query, all_servers)
+        if not srv:
+            matching = _servers_matching_query(all_servers, query)
+            if matching:
+                srv = _select_server(matching, f"Select server to view for '{query}':")
+            else:
+                console.print(f"[red]No server matches '{query}'.[/red]")
+                raise typer.Exit(1)
+
+    # Build a two-column detail table
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("field", style="dim", no_wrap=True)
+    table.add_column("value")
+
+    table.add_row("Name", f"[bold]{srv.name}[/bold]")
+    table.add_row("ID", srv.id)
+    table.add_row("Host", f"{srv.username}@{srv.host}:{srv.port}")
+
+    # Authentication
+    if srv.certificate_path:
+        auth_line = f"certificate [dim]({srv.certificate_path})[/dim]"
+        if srv.key_path:
+            auth_line += f" + key [dim]({srv.key_path})[/dim]"
+    elif srv.key_path:
+        auth_line = f"key [dim]({srv.key_path})[/dim]"
+    elif srv.password:
+        auth_line = "password [dim](set)[/dim]"
+    else:
+        auth_line = "OpenSSH default (no key/password/cert pinned)"
+    table.add_row("Auth", auth_line)
+
+    # Jump chain
+    if srv.jump_host:
+        try:
+            chain = resolve_jump_chain(srv, all_servers)
+            chain_str = " → ".join(f"{j.username}@{j.host}:{j.port}" for j in chain) + f" → {srv.name}"
+            table.add_row("Jump chain", f"[cyan]{chain_str}[/cyan]")
+        except JumpResolutionError as exc:
+            table.add_row("Jump chain", f"[red]broken: {exc}[/red]")
+
+    # Keep-alive
+    if srv.keep_alive_interval:
+        table.add_row("Keep-alive", f"[green]{srv.keep_alive_interval}s[/green]")
+
+    # Tags
+    if srv.tags:
+        table.add_row("Tags", "[magenta]" + ", ".join(srv.tags) + "[/magenta]")
+
+    # Notes (full, not truncated)
+    if srv.notes:
+        table.add_row("Notes", srv.notes)
+
+    # Usage stats
+    table.add_row("Pinned", "yes" if srv.favorite else "no")
+    table.add_row("Used", f"{srv.use_count} time(s)")
+    if srv.last_used_at:
+        table.add_row("Last used", srv.last_used_at.isoformat(timespec="seconds"))
+    else:
+        table.add_row("Last used", "[dim]never[/dim]")
+
+    # Servers that reference this one as jump host
+    dependents = [s.name for s in all_servers if s.jump_host == srv.name and s.id != srv.id]
+    if dependents:
+        label = "server uses" if len(dependents) == 1 else "servers use"
+        table.add_row("Used as jump by", f"[yellow]{len(dependents)} {label}: {', '.join(dependents)}[/yellow]")
+
+    console.print(Panel(table, title=f"[bold]{srv.name}[/bold]", border_style="cyan", expand=False))
 
 
 @app.command("remove", help="Remove a server. Alias: rm")
