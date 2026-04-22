@@ -13,6 +13,9 @@ A command-line tool for managing SSH connections with an interactive interface, 
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
+  - [Filtering the Server List](#filtering-the-server-list)
+  - [Adding Servers Non-Interactively](#adding-servers-non-interactively)
+  - [Server Notes and Keep-Alive](#server-notes-and-keep-alive)
 - [Jump Hosts (ProxyJump)](#jump-hosts-proxyjump)
 - [Configuration](#configuration)
 - [Password Encryption](#password-encryption)
@@ -34,12 +37,16 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Automatic password clipboard integration
 - Support for SSH private key and certificate authentication
 - ProxyJump support — connect through a bastion host (or a chain of hosts)
+- Optional SSH keep-alive per server (ServerAliveInterval)
+- Free-form notes attached to each server
 - Server management (add, edit, remove, list)
+- `bssh ls <query>` filter by name, host, user, tag, id prefix, or jump host
 - Server availability checking (ping individual or health check all)
 - Configuration backup and restore (export/import)
 - Cross-platform compatibility (Windows, macOS, Linux)
 - Short command aliases for faster workflow
 - Flexible server identification (by name, partial name, or ID)
+- Non-interactive CLI flags for scripted provisioning
 - Auto-detection of SSH keys in standard locations
 
 ## Installation
@@ -171,7 +178,7 @@ Use `bssh pin <query>` to keep critical hosts above the normal recent/frequent o
 
 Most commands work without arguments and will present an interactive menu.
 
-`bssh add` interactively asks whether to set an SSH key and password after the basic fields.
+`bssh add` interactively asks whether to set an SSH key, password, jump host, note, and keep-alive after the basic fields. All of these also have non-interactive flags for scripted use (see [Adding Servers Non-Interactively](#adding-servers-non-interactively)).
 
 For password-based hosts, `bssh` copies the saved password to your clipboard before starting OpenSSH. You still paste it into the SSH password prompt manually; the password is not injected into the `ssh` command automatically.
 
@@ -181,6 +188,59 @@ For detailed help on any command, use `--help`:
 bssh connect --help
 bssh add --help
 ```
+
+### Filtering the Server List
+
+`bssh ls` accepts an optional query that filters the table by substring against name, host, username, tags, jump host, and id prefix (all case-insensitive except the id prefix):
+
+```bash
+bssh ls prod          # matches name/host/user/tag/jump containing "prod"
+bssh ls bastion       # surfaces both the bastion itself and everything routed through it
+bssh ls a1b2          # id-prefix match
+```
+
+When nothing matches, the command prints a single friendly line instead of an empty table. Omitting the query lists everything as before.
+
+### Adding Servers Non-Interactively
+
+Every field `bssh add` prompts for has an equivalent flag, so the full flow can be scripted:
+
+```bash
+bssh add \
+  --name prod-db \
+  --host 10.0.0.5 \
+  --port 22 \
+  --username deploy \
+  --key ~/.ssh/prod_ed25519 \
+  --certificate ~/.ssh/prod_ed25519-cert.pub \
+  --jump bastion \
+  --keep-alive 60 \
+  --notes "main postgres"
+```
+
+Flag reference:
+
+| Flag | Short | Purpose |
+| --- | --- | --- |
+| `--key <path>` | — | Path to SSH private key |
+| `--certificate <path>` | — | Path to SSH certificate |
+| `--password <value>` | — | Password (see security note below) |
+| `--jump <name>` | `-J` | Saved server name to use as ProxyJump (case-insensitive) |
+| `--keep-alive <seconds>` | `-K` | `ServerAliveInterval` in seconds; `0` leaves it disabled |
+| `--notes <text>` | — | Free-form note attached to the server |
+
+Passing an empty string (`--key ""`, `--notes ""`) stores `None` — useful when a script wants to be explicit about clearing a field.
+
+> **`--password` security note:** values passed on the command line end up in shell history (e.g. `~/.bash_history`), `/proc/<pid>/cmdline`, and process-listing tools. Prefer the interactive prompt when possible. The flag exists for provisioning scripts that source the password from a secure secret store at invocation time.
+
+### Server Notes and Keep-Alive
+
+Two optional per-server fields surface in the table when set:
+
+- **Notes** — free-form text attached to a server (shown as the `Notes` column, truncated at 40 chars). Edit with `bssh edit` or set at creation time with `--notes`.
+- **Keep-Alive** — a `ServerAliveInterval` value in seconds. When set, `bssh connect` passes `-o ServerAliveInterval=<N> -o ServerAliveCountMax=3` to OpenSSH, preventing NAT/idle disconnects. Shown as the `Alive` column (e.g. `60s`). Enter `0` at the prompt (or `--keep-alive 0`) to leave it disabled.
+
+Both columns are auto-hidden when no server has a value set.
 
 ### Importing From SSH Config
 
