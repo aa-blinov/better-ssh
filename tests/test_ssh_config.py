@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from app.ssh_config import collect_host_aliases, import_ssh_config
+from app.models import Forward, Server
+from app.ssh_config import (
+    collect_host_aliases,
+    import_ssh_config,
+    render_server_as_ssh_config_block,
+    render_servers_as_ssh_config,
+)
 
 
 def test_collect_host_aliases_reads_explicit_hosts_and_includes(temp_ssh_dir: Path):
@@ -140,3 +146,102 @@ def test_import_ssh_config_skips_inline_proxyjump_spec(
 
     assert len(servers) == 1
     assert servers[0].jump_host is None
+
+
+# ---------------------------------------------------------------------------
+# render_server_as_ssh_config_block / render_servers_as_ssh_config
+# ---------------------------------------------------------------------------
+
+
+def test_render_block_minimal_server_uses_only_required_directives():
+    """Test a server with only name/host/user renders the essential three lines and no more."""
+    srv = Server(name="minimal", host="h.example", username="deploy")
+    block = render_server_as_ssh_config_block(srv)
+    assert "Host minimal" in block
+    assert "    HostName h.example" in block
+    assert "    User deploy" in block
+    # Port 22 is the default — should be omitted
+    assert "Port" not in block
+    # Nothing else set -> no IdentityFile / ProxyJump / ForwardX11 lines
+    assert "IdentityFile" not in block
+    assert "ProxyJump" not in block
+    assert "ForwardX11" not in block
+    assert "LocalForward" not in block
+
+
+def test_render_block_emits_all_supported_fields():
+    """Test a fully-populated server renders every mapped directive."""
+    srv = Server(
+        name="full",
+        host="h.example",
+        username="deploy",
+        port=2222,
+        key_path="/keys/id_ed25519",
+        certificate_path="/keys/id_ed25519-cert.pub",
+        jump_host="bastion",
+        keep_alive_interval=60,
+        x11_forwarding=True,
+        tags=["prod", "db"],
+        notes="primary cluster",
+        forwards=[
+            Forward(type="local", local_port=5432, remote_host="localhost", remote_port=5432),
+            Forward(type="remote", local_port=9000, remote_host="internal", remote_port=9000),
+            Forward(type="dynamic", local_port=1080),
+        ],
+    )
+    block = render_server_as_ssh_config_block(srv)
+
+    assert "# Note: primary cluster" in block
+    assert "# Tags: prod, db" in block
+    assert "Host full" in block
+    assert "    HostName h.example" in block
+    assert "    User deploy" in block
+    assert "    Port 2222" in block
+    assert "    IdentityFile /keys/id_ed25519" in block
+    assert "    CertificateFile /keys/id_ed25519-cert.pub" in block
+    assert "    ProxyJump bastion" in block
+    assert "    ServerAliveInterval 60" in block
+    assert "    ServerAliveCountMax 3" in block
+    assert "    ForwardX11 yes" in block
+    assert "    LocalForward 5432 localhost:5432" in block
+    assert "    RemoteForward 9000 internal:9000" in block
+    assert "    DynamicForward 1080" in block
+
+
+def test_render_block_preserves_bind_host_on_forwards():
+    """Test bind-host-qualified forwards render with the `bind:port` prefix."""
+    srv = Server(
+        name="bound",
+        host="h.example",
+        username="u",
+        forwards=[
+            Forward(type="local", bind_host="127.0.0.1", local_port=8080, remote_host="web", remote_port=80),
+            Forward(type="dynamic", bind_host="127.0.0.1", local_port=1080),
+        ],
+    )
+    block = render_server_as_ssh_config_block(srv)
+    assert "    LocalForward 127.0.0.1:8080 web:80" in block
+    assert "    DynamicForward 127.0.0.1:1080" in block
+
+
+def test_render_block_mentions_password_but_does_not_emit_it():
+    """Test a server with a password gets a warning comment, never the value."""
+    srv = Server(name="pwd", host="h.example", username="u", password="super-secret")
+    block = render_server_as_ssh_config_block(srv)
+    assert "super-secret" not in block
+    assert "Password is stored in bssh but not exported here." in block
+
+
+def test_render_full_file_includes_header_and_blocks():
+    """Test the top-level renderer wraps blocks with a header comment."""
+    servers = [
+        Server(name="a", host="a.example", username="u"),
+        Server(name="b", host="b.example", username="u"),
+    ]
+    text = render_servers_as_ssh_config(servers)
+    assert "# ~/.ssh/config fragment exported from better-ssh" in text
+    assert "2 server(s)" in text
+    assert "Host a" in text
+    assert "Host b" in text
+    # Each block ends with its own newline
+    assert text.count("Host ") == 2

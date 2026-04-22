@@ -19,6 +19,7 @@ A command-line tool for managing SSH connections with an interactive interface, 
   - [Port Forwarding](#port-forwarding)
   - [File Transfer (put / get)](#file-transfer-put--get)
   - [X11 Forwarding](#x11-forwarding)
+  - [Exporting Back to SSH Config](#exporting-back-to-ssh-config)
   - [Viewing a Single Server](#viewing-a-single-server)
 - [Jump Hosts (ProxyJump)](#jump-hosts-proxyjump)
 - [Configuration](#configuration)
@@ -45,6 +46,7 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Per-server port forwarding presets (local `-L`, remote `-R`, dynamic SOCKS `-D`)
 - Optional X11 forwarding per server (`ssh -X`)
 - File transfer (`bssh put` / `bssh get`) that reuses a server's stored profile
+- Round-trip with OpenSSH config: `bssh isc` imports Host blocks; `bssh esc` exports them back
 - Free-form notes and tags attached to each server
 - Detailed per-server card view (`bssh view <name>`)
 - Time-sorted "recents" list (`bssh recent`) with a relative `Last used` column
@@ -168,6 +170,7 @@ Commands:
   encrypt             Enable password encryption.     Alias: enc
   encryption-status   Show encryption status.         Alias: es
   export              Export servers to JSON file.    Alias: ex
+  export-ssh-config   Export servers to SSH config.   Alias: esc
   get                 Download a remote file/dir (scp).
   health              Check all servers availability. Alias: h
   import              Import servers from JSON file.  Alias: im
@@ -387,6 +390,35 @@ bssh isc ~/.ssh/work-config
 The importer resolves each host through `ssh -G`, so `Host *`, `Include`, explicit `IdentityFile`, and explicit `CertificateFile` are reflected in imported entries.
 
 Default OpenSSH keys remain implicit. If a host works with plain `ssh host` because of default keys or `ssh-agent`, `bssh` will keep using that behavior without pinning a key path unless your SSH config explicitly does so.
+
+### Exporting Back to SSH Config
+
+The reverse operation — turn every saved server into `Host` blocks that native OpenSSH tooling (`ssh`/`scp`/`rsync`/`git`/IDEs) can read directly:
+
+```bash
+bssh export-ssh-config ~/.ssh/config.bssh
+# or the short alias:
+bssh esc ~/.ssh/config.d/bssh.conf
+```
+
+Each server becomes a `Host <name>` block with every field that has an ssh_config equivalent:
+
+- `HostName`, `User`, non-default `Port`
+- `IdentityFile`, `CertificateFile`
+- `ProxyJump`
+- `ServerAliveInterval` + `ServerAliveCountMax 3` (when keep-alive is set)
+- `ForwardX11 yes` (when X11 is enabled)
+- `LocalForward` / `RemoteForward` / `DynamicForward` (one line per port forward, bind host preserved)
+
+Fields that have no native ssh_config syntax (`password`, `tags`, `notes`) are written as leading comments so the context survives for a human reader.
+
+After exporting, activate the file by adding
+
+```text
+Include ~/.ssh/config.bssh
+```
+
+to your `~/.ssh/config`, or pass `-F ~/.ssh/config.bssh` directly to `ssh`. Overwriting an existing file prompts for confirmation.
 
 ### Server Identification
 

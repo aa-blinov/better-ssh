@@ -518,6 +518,76 @@ def test_add_with_empty_flag_values_stores_none(
     assert added.notes is None
 
 
+def test_export_ssh_config_command_writes_host_blocks(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+):
+    """Test `bssh export-ssh-config <path>` writes a readable ssh_config file."""
+    save_servers(
+        [
+            Server(id="a", name="alpha", host="a.example", username="u1"),
+            Server(id="b", name="beta", host="b.example", username="u2", port=2222),
+        ]
+    )
+    output = tmp_path / "bssh.conf"
+
+    result = runner.invoke(app, ["export-ssh-config", str(output)])
+
+    assert result.exit_code == 0
+    text = output.read_text(encoding="utf-8")
+    assert "Host alpha" in text
+    assert "    HostName a.example" in text
+    assert "    User u1" in text
+    assert "Host beta" in text
+    assert "    Port 2222" in text
+
+
+def test_export_ssh_config_command_empty_state(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+):
+    """Test the command refuses to write when no servers are saved."""
+    result = runner.invoke(app, ["export-ssh-config", str(tmp_path / "nope.conf")])
+
+    assert result.exit_code == 1
+    assert "No servers to export" in result.stdout
+
+
+def test_export_ssh_config_command_overwrite_prompt_declined(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test declining the overwrite confirm leaves the existing file untouched."""
+    save_servers([Server(id="a", name="alpha", host="a.example", username="u")])
+    existing = tmp_path / "existing.conf"
+    existing.write_text("# do not touch\n", encoding="utf-8")
+    monkeypatch.setattr("app.cli.backup.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["export-ssh-config", str(existing)])
+
+    assert result.exit_code == 0
+    assert existing.read_text(encoding="utf-8") == "# do not touch\n"
+
+
+def test_export_ssh_config_alias_esc(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+):
+    """Test the short `esc` alias is wired to the same command."""
+    save_servers([Server(id="a", name="alpha", host="a.example", username="u")])
+    output = tmp_path / "out.conf"
+
+    result = runner.invoke(app, ["esc", str(output)])
+
+    assert result.exit_code == 0
+    assert "Host alpha" in output.read_text(encoding="utf-8")
+
+
 def test_import_command_replace_mode_replaces_all_servers(
     runner: CliRunner,
     temp_config_dir: Path,

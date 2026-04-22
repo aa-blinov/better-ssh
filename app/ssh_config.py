@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .models import Server
+from .models import Forward, Server
 
 
 def expand_ssh_path(path: str | Path) -> Path:
@@ -180,3 +180,62 @@ def import_ssh_config(config_path: Path) -> list[Server]:
         )
 
     return servers
+
+
+def _render_forward_as_config_line(fwd: Forward) -> str:
+    """Render a single Forward as the corresponding ssh_config directive."""
+    bind = f"{fwd.bind_host}:" if fwd.bind_host else ""
+    if fwd.type == "dynamic":
+        return f"    DynamicForward {bind}{fwd.local_port}"
+    keyword = "LocalForward" if fwd.type == "local" else "RemoteForward"
+    # ssh_config uses a space between the listen spec and the target spec,
+    # whereas -L / -R use a colon. Same semantic, different separator.
+    return f"    {keyword} {bind}{fwd.local_port} {fwd.remote_host}:{fwd.remote_port}"
+
+
+def render_server_as_ssh_config_block(server: Server) -> str:
+    """Render a Server as a single ssh_config Host block (with trailing newline).
+
+    Fields that have no ssh_config equivalent (password, tags, notes) are
+    emitted as leading comments so the exported file still carries context
+    — useful when the file is opened by a human later.
+    """
+    lines: list[str] = []
+
+    if server.notes:
+        lines.extend(f"# Note: {note_line}" for note_line in server.notes.splitlines())
+    if server.tags:
+        lines.append(f"# Tags: {', '.join(server.tags)}")
+    if server.password:
+        lines.append("# Password is stored in bssh but not exported here.")
+
+    lines.append(f"Host {server.name}")
+    lines.append(f"    HostName {server.host}")
+    lines.append(f"    User {server.username}")
+    if server.port != 22:
+        lines.append(f"    Port {server.port}")
+    if server.key_path:
+        lines.append(f"    IdentityFile {server.key_path}")
+    if server.certificate_path:
+        lines.append(f"    CertificateFile {server.certificate_path}")
+    if server.jump_host:
+        lines.append(f"    ProxyJump {server.jump_host}")
+    if server.keep_alive_interval and server.keep_alive_interval > 0:
+        lines.append(f"    ServerAliveInterval {server.keep_alive_interval}")
+        lines.append("    ServerAliveCountMax 3")
+    if server.x11_forwarding:
+        lines.append("    ForwardX11 yes")
+    lines.extend(_render_forward_as_config_line(fwd) for fwd in server.forwards)
+
+    return "\n".join(lines) + "\n"
+
+
+def render_servers_as_ssh_config(servers: list[Server]) -> str:
+    """Render a list of servers as a full ssh_config-compatible file body."""
+    header = (
+        "# ~/.ssh/config fragment exported from better-ssh\n"
+        f"# {len(servers)} server(s) - regenerate with: bssh export-ssh-config <path>\n"
+        "\n"
+    )
+    blocks = [render_server_as_ssh_config_block(s) for s in servers]
+    return header + "\n".join(blocks)
