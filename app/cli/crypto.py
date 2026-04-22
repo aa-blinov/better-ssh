@@ -88,7 +88,7 @@ def enable_encryption():
     storage.save_servers(servers)
 
     console.print("\n[bold green]Encryption enabled.[/bold green]")
-    console.print(f"Using SSH key: [cyan]{ssh_key}[/cyan]")
+    console.print(f"Using SSH key: [cyan]{escape(str(ssh_key))}[/cyan]")
     console.print(f"Encrypted servers: [cyan]{len([s for s in servers if s.password])}[/cyan]")
 
 

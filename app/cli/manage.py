@@ -151,7 +151,7 @@ def add_server(
 
         error = check_jump_cycle(existing_servers, server)
         if error:
-            console.print(f"[red]{error}[/red]")
+            console.print(f"[red]{escape(error)}[/red]")
             raise typer.Exit(1)
 
         storage.upsert_server(server)
@@ -373,7 +373,7 @@ def edit(
                     other.jump_host = name
         error = check_jump_cycle(prospective, srv)
         if error:
-            console.print(f"[red]{error}[/red]")
+            console.print(f"[red]{escape(error)}[/red]")
             console.print("[dim]No changes saved.[/dim]")
             raise typer.Exit(1)
 
