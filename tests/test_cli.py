@@ -412,6 +412,94 @@ def test_edit_can_clear_existing_note(
     assert updated.notes is None
 
 
+def test_add_with_keep_alive_flag_skips_prompt(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --keep-alive N sets the interval non-interactively and skips the confirm."""
+    confirms: list[str] = []
+
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: confirms.append(text) or False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "add",
+            "--name",
+            "KA",
+            "--host",
+            "h.example",
+            "--port",
+            "22",
+            "--username",
+            "u",
+            "--keep-alive",
+            "90",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Enable SSH keep-alive?" not in confirms
+    added = next(s for s in load_servers() if s.name == "KA")
+    assert added.keep_alive_interval == 90
+
+
+def test_add_with_keep_alive_flag_zero_leaves_disabled(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --keep-alive 0 explicitly disables and does not re-prompt."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "KA0", "--host", "h.example", "--port", "22", "--username", "u", "-K", "0"],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "KA0")
+    assert added.keep_alive_interval is None
+
+
+def test_list_shows_alive_column_when_any_server_has_keep_alive(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test ls shows the 'Alive' column when at least one server has keep-alive set."""
+    save_servers(
+        [
+            Server(id="k-1", name="Alive60", host="a.example", username="u", keep_alive_interval=60),
+            Server(id="p-1", name="Plain", host="p.example", username="u"),
+        ]
+    )
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    assert "Alive" in result.stdout
+    assert "60s" in result.stdout
+
+
+def test_list_hides_alive_column_when_no_keep_alive(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test ls hides the 'Alive' column when no server has keep-alive set."""
+    save_servers([Server(id="p-1", name="Plain", host="p.example", username="u")])
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    assert "Alive" not in result.stdout
+
+
 def test_list_shows_notes_column_when_any_server_has_notes(cli_with_servers: CliRunner):
     """Test ls shows the 'Notes' column when at least one server has a note set."""
     # Sample data has TestServer1 with notes="Production web server"

@@ -61,6 +61,7 @@ def _print_no_servers_message() -> None:
 def _print_servers(servers: list[Server]) -> None:
     """Print servers table."""
     show_via = any(s.jump_host for s in servers)
+    show_keepalive = any(s.keep_alive_interval for s in servers)
     show_notes = any(s.notes for s in servers)
     table = Table(title="Servers")
     table.add_column("ID", style="dim", no_wrap=True)
@@ -70,6 +71,8 @@ def _print_servers(servers: list[Server]) -> None:
     table.add_column("Auth", justify="center", no_wrap=True)
     if show_via:
         table.add_column("Via", style="cyan", no_wrap=True)
+    if show_keepalive:
+        table.add_column("Alive", style="green", justify="right", no_wrap=True)
     if show_notes:
         table.add_column("Notes", style="dim", max_width=40, overflow="ellipsis")
 
@@ -78,6 +81,8 @@ def _print_servers(servers: list[Server]) -> None:
         row = [s.id[:8], _favorite_label(s), s.name, f"{s.username}@{s.host}:{s.port}", auth]
         if show_via:
             row.append(s.jump_host or "")
+        if show_keepalive:
+            row.append(f"{s.keep_alive_interval}s" if s.keep_alive_interval else "")
         if show_notes:
             row.append(s.notes or "")
         table.add_row(*row)
@@ -336,6 +341,13 @@ def add_server(
     port: int = typer.Option(22, prompt=True),
     username: str | None = typer.Option(None, prompt=True),
     jump: str | None = typer.Option(None, "--jump", "-J", help="Use this saved server as ProxyJump"),
+    keep_alive: int | None = typer.Option(
+        None,
+        "--keep-alive",
+        "-K",
+        help="Enable SSH keep-alive with interval in seconds (0 to skip)",
+        min=0,
+    ),
 ):
     """Add a new server."""
     try:
@@ -383,7 +395,10 @@ def add_server(
             notes = typer.prompt("Note") or None
 
         keep_alive_interval: int | None = None
-        if typer.confirm("Enable SSH keep-alive?", default=False):
+        if keep_alive is not None:
+            # Non-interactive: keep_alive > 0 enables; 0 keeps disabled (consistent with helper)
+            keep_alive_interval = keep_alive if keep_alive > 0 else None
+        elif typer.confirm("Enable SSH keep-alive?", default=False):
             keep_alive_interval = _prompt_keep_alive_interval(60)
 
         server = Server(
