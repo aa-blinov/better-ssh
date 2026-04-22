@@ -629,7 +629,14 @@ def test_encrypt_command_enables_and_encrypts_passwords(
 
     fake_key = tmp_path / "id_ed25519"
     fake_key.write_bytes(b"fake key material")
+    # Patch both the CLI-side SSH-key lookup (for the "do we have a key?" check
+    # in enable_encryption) and the encryption-module lookup used internally by
+    # storage.save_servers. Without the second patch, the real
+    # find_ssh_key_for_encryption returns None on CI hosts with no SSH key,
+    # encrypt_password raises, contextlib.suppress swallows it, and the
+    # password stays plaintext on disk.
     monkeypatch.setattr("app.cli.crypto.find_ssh_key_for_encryption", lambda: fake_key)
+    monkeypatch.setattr("app.encryption.find_ssh_key_for_encryption", lambda: fake_key)
     monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: True)
 
     result = runner.invoke(app, ["encrypt"])
