@@ -7,10 +7,13 @@ pins down the contract before these helpers are extracted into app.domain.
 
 from __future__ import annotations
 
+import pytest
+
 from app.domain import (
     check_jump_cycle,
     jump_host_usage_map,
     name_conflict,
+    parse_forward_spec,
     parse_tags,
     servers_matching_query,
     sort_servers,
@@ -211,3 +214,93 @@ def test_sort_servers_stable_fallback_to_name():
     ]
     ordered = _sort_servers(servers)
     assert [s.name for s in ordered] == ["Alpha", "Bravo", "Charlie"]
+
+
+# ---------------------------------------------------------------------------
+# parse_forward_spec
+# ---------------------------------------------------------------------------
+
+
+def test_parse_forward_local_without_bind():
+    f = parse_forward_spec("5432:localhost:5432", "local")
+    assert f.type == "local"
+    assert f.bind_host is None
+    assert f.local_port == 5432
+    assert f.remote_host == "localhost"
+    assert f.remote_port == 5432
+
+
+def test_parse_forward_local_with_bind():
+    f = parse_forward_spec("127.0.0.1:8080:web:80", "local")
+    assert f.type == "local"
+    assert f.bind_host == "127.0.0.1"
+    assert f.local_port == 8080
+    assert f.remote_host == "web"
+    assert f.remote_port == 80
+
+
+def test_parse_forward_remote_mirrors_local_syntax():
+    f = parse_forward_spec("9000:internal:9000", "remote")
+    assert f.type == "remote"
+    assert f.local_port == 9000
+
+
+def test_parse_forward_dynamic_port_only():
+    f = parse_forward_spec("1080", "dynamic")
+    assert f.type == "dynamic"
+    assert f.bind_host is None
+    assert f.local_port == 1080
+    assert f.remote_host is None
+
+
+def test_parse_forward_dynamic_with_bind():
+    f = parse_forward_spec("127.0.0.1:1080", "dynamic")
+    assert f.type == "dynamic"
+    assert f.bind_host == "127.0.0.1"
+    assert f.local_port == 1080
+
+
+def test_parse_forward_roundtrip_via_to_ssh_spec():
+    for spec, kind in [
+        ("5432:localhost:5432", "local"),
+        ("127.0.0.1:8080:web:80", "local"),
+        ("9000:internal:9000", "remote"),
+        ("1080", "dynamic"),
+        ("127.0.0.1:1080", "dynamic"),
+    ]:
+        f = parse_forward_spec(spec, kind)
+        assert f.to_ssh_spec() == spec
+
+
+def test_parse_forward_rejects_empty_string():
+    with pytest.raises(ValueError, match="Empty"):
+        parse_forward_spec("", "local")
+
+
+def test_parse_forward_rejects_unknown_kind():
+    with pytest.raises(ValueError, match="Unknown forward kind"):
+        parse_forward_spec("5432:localhost:5432", "lateral")
+
+
+def test_parse_forward_rejects_malformed_local():
+    with pytest.raises(ValueError, match="Invalid local forward"):
+        parse_forward_spec("5432:localhost", "local")
+    with pytest.raises(ValueError, match="Invalid local forward"):
+        parse_forward_spec("a:b:c:d:e", "local")
+
+
+def test_parse_forward_rejects_malformed_dynamic():
+    with pytest.raises(ValueError, match="Invalid dynamic forward"):
+        parse_forward_spec("a:b:c", "dynamic")
+
+
+def test_parse_forward_rejects_non_integer_port():
+    with pytest.raises(ValueError, match="Invalid port"):
+        parse_forward_spec("notaport:localhost:5432", "local")
+    with pytest.raises(ValueError, match="Invalid port"):
+        parse_forward_spec("notaport", "dynamic")
+
+
+def test_parse_forward_rejects_empty_remote_host():
+    with pytest.raises(ValueError, match="remote host is empty"):
+        parse_forward_spec("5432::5432", "local")

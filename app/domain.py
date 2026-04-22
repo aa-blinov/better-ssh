@@ -8,7 +8,69 @@ touching stdin/stdout or the filesystem.
 
 from __future__ import annotations
 
-from .models import Server
+from .models import Forward, Server
+
+
+def parse_forward_spec(spec: str, kind: str) -> Forward:
+    """Parse an OpenSSH-style forwarding spec into a typed ``Forward``.
+
+    ``kind`` must be one of "local" / "remote" / "dynamic" and selects the
+    expected syntax:
+
+    - local / remote: ``[bind:]local_port:remote_host:remote_port``
+    - dynamic:        ``[bind:]local_port``
+
+    Raises ``ValueError`` with a user-facing message when the spec is
+    malformed so callers can surface it unchanged.
+    """
+    if kind not in {"local", "remote", "dynamic"}:
+        raise ValueError(f"Unknown forward kind: {kind!r}")
+
+    raw = spec.strip()
+    if not raw:
+        raise ValueError("Empty forwarding spec")
+
+    parts = raw.split(":")
+
+    if kind == "dynamic":
+        # Either "port" or "bind:port"
+        if len(parts) == 1:
+            bind_host, port_str = None, parts[0]
+        elif len(parts) == 2:
+            bind_host, port_str = parts[0], parts[1]
+        else:
+            raise ValueError(f"Invalid dynamic forward '{raw}': expected [bind:]port")
+        try:
+            port = int(port_str)
+        except ValueError as exc:
+            raise ValueError(f"Invalid port in '{raw}': {port_str}") from exc
+        return Forward(type="dynamic", bind_host=bind_host, local_port=port)
+
+    # local / remote share the same syntax
+    if len(parts) == 3:
+        bind_host = None
+        local_port_str, remote_host, remote_port_str = parts
+    elif len(parts) == 4:
+        bind_host, local_port_str, remote_host, remote_port_str = parts
+    else:
+        raise ValueError(f"Invalid {kind} forward '{raw}': expected [bind:]port:host:port")
+
+    if not remote_host:
+        raise ValueError(f"Invalid {kind} forward '{raw}': remote host is empty")
+
+    try:
+        local_port = int(local_port_str)
+        remote_port = int(remote_port_str)
+    except ValueError as exc:
+        raise ValueError(f"Invalid port in '{raw}'") from exc
+
+    return Forward(
+        type=kind,
+        bind_host=bind_host,
+        local_port=local_port,
+        remote_host=remote_host,
+        remote_port=remote_port,
+    )
 
 
 def auth_label(server: Server) -> str:
