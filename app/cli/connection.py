@@ -75,7 +75,7 @@ def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
             console.print("Check encryption status: [cyan]bssh es[/cyan]")
         else:
             console.print("[red]Password is encrypted but encryption is disabled.[/red]")
-            console.print("Re-enable and then properly disable: [cyan]bssh enc[/cyan] → [cyan]bssh dec[/cyan]")
+            console.print("Re-enable and then properly disable: [cyan]bssh enc[/cyan] -> [cyan]bssh dec[/cyan]")
         raise typer.Exit(1)
 
     try:
@@ -113,7 +113,7 @@ def show_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
             console.print("Check encryption status: [cyan]bssh es[/cyan]")
         else:
             console.print("[red]Password is encrypted but encryption is disabled.[/red]")
-            console.print("Re-enable and then properly disable: [cyan]bssh enc[/cyan] → [cyan]bssh dec[/cyan]")
+            console.print("Re-enable and then properly disable: [cyan]bssh enc[/cyan] -> [cyan]bssh dec[/cyan]")
         raise typer.Exit(1)
 
     console.print(f"[bold]{srv.password}[/bold]")

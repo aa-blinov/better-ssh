@@ -48,13 +48,13 @@ def add_server(
     note: str | None = typer.Option(None, "--notes", help="Free-form note attached to the server"),
     tag: list[str] | None = typer.Option(None, "--tag", "-t", help="Tag (repeatable: -t prod -t db)"),
     local_forward: list[str] | None = typer.Option(
-        None, "-L", help="Local forward (repeatable): [bind:]port:host:port"
+        None, "-L", help=r"Local forward, repeatable: \[bind:]port:host:port"
     ),
     remote_forward: list[str] | None = typer.Option(
-        None, "-R", help="Remote forward (repeatable): [bind:]port:host:port"
+        None, "-R", help=r"Remote forward, repeatable: \[bind:]port:host:port"
     ),
     dynamic_forward: list[str] | None = typer.Option(
-        None, "-D", help="Dynamic SOCKS forward (repeatable): [bind:]port"
+        None, "-D", help=r"Dynamic SOCKS forward, repeatable: \[bind:]port"
     ),
 ):
     """Add a new server."""
@@ -88,12 +88,15 @@ def add_server(
             password = typer.prompt("Password", hide_input=True, confirmation_prompt=True) or None
 
         jump_host: str | None = None
-        if jump:
-            match = next((s for s in existing_servers if s.name.lower() == jump.lower()), None)
-            if match is None:
-                console.print(f"[red]Jump host '{jump}' not found in saved servers.[/red]")
-                raise typer.Exit(1)
-            jump_host = match.name
+        if jump is not None:
+            # --jump "" explicitly skips the prompt (leaves jump_host as None);
+            # --jump <name> looks up the reference case-insensitively.
+            if jump:
+                match = next((s for s in existing_servers if s.name.lower() == jump.lower()), None)
+                if match is None:
+                    console.print(f"[red]Jump host '{jump}' not found in saved servers.[/red]")
+                    raise typer.Exit(1)
+                jump_host = match.name
         elif typer.confirm("Use a jump host (ProxyJump)?", default=False):
             candidates = [s for s in existing_servers if s.name != name]
             _, jump_host = _select_jump_host(
@@ -376,7 +379,7 @@ def edit(
             storage.save_servers(all_servers)
             console.print(
                 f"[green]Saved.[/green] Updated {len(used_by)} jump-host reference(s): "
-                f"[cyan]{old_name}[/cyan] → [cyan]{name}[/cyan]"
+                f"[cyan]{old_name}[/cyan] -> [cyan]{name}[/cyan]"
             )
         else:
             storage.upsert_server(srv)
@@ -483,7 +486,7 @@ def view(query: str | None = typer.Argument(None, help="ID/name/partial name (op
     if srv.jump_host:
         try:
             chain = resolve_jump_chain(srv, all_servers)
-            chain_str = " → ".join(f"{j.username}@{j.host}:{j.port}" for j in chain) + f" → {srv.name}"
+            chain_str = " -> ".join(f"{j.username}@{j.host}:{j.port}" for j in chain) + f" -> {srv.name}"
             table.add_row("Jump chain", f"[cyan]{chain_str}[/cyan]")
         except JumpResolutionError as exc:
             table.add_row("Jump chain", f"[red]broken: {exc}[/red]")

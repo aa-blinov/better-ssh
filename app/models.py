@@ -29,12 +29,16 @@ class Forward(BaseModel):
         return f"{prefix}{self.local_port}:{self.remote_host}:{self.remote_port}"
 
     def display(self) -> str:
-        """Short human-readable representation for tables and panels."""
+        """Short human-readable representation for tables and panels.
+
+        Kept to ASCII so Rich can render it on legacy Windows terminals
+        (cp1251 / cp866) without raising UnicodeEncodeError.
+        """
         letter = {"local": "L", "remote": "R", "dynamic": "D"}[self.type]
         bind = f"{self.bind_host}:" if self.bind_host else ""
         if self.type == "dynamic":
             return f"{letter} {bind}{self.local_port}"
-        return f"{letter} {bind}{self.local_port}→{self.remote_host}:{self.remote_port}"
+        return f"{letter} {bind}{self.local_port} -> {self.remote_host}:{self.remote_port}"
 
 
 class Server(BaseModel):

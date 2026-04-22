@@ -113,8 +113,8 @@ def test_forward_dynamic_to_ssh_spec_with_bind():
 def test_forward_display_local_and_remote_use_arrow():
     local = Forward(type="local", local_port=5432, remote_host="db", remote_port=5432)
     remote = Forward(type="remote", local_port=80, remote_host="inside", remote_port=8080)
-    assert local.display() == "L 5432→db:5432"
-    assert remote.display() == "R 80→inside:8080"
+    assert local.display() == "L 5432 -> db:5432"
+    assert remote.display() == "R 80 -> inside:8080"
 
 
 def test_forward_display_dynamic_shows_port_only():
