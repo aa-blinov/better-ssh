@@ -733,6 +733,86 @@ def test_add_with_jump_flag_sets_jump_host_without_prompt(
     assert added.jump_host == "Bastion"
 
 
+def test_remove_cascade_clears_dependents_jump_host(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test removing a server used as jump host clears jump_host on dependents."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="T1", host="t1.example", username="u", jump_host="Bastion"),
+            Server(id="t-2", name="T2", host="t2.example", username="u", jump_host="Bastion"),
+        ]
+    )
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: True)
+
+    result = runner.invoke(app, ["rm", "Bastion"])
+
+    assert result.exit_code == 0
+    remaining = {s.name: s for s in load_servers()}
+    assert "Bastion" not in remaining
+    assert remaining["T1"].jump_host is None
+    assert remaining["T2"].jump_host is None
+
+
+def test_remove_cascade_cancel_keeps_everything(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test declining the cascade-clear prompt aborts the removal entirely."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="T1", host="t1.example", username="u", jump_host="Bastion"),
+        ]
+    )
+    # First confirm (remove) -> True; second (cascade clear) -> False
+    answers = iter([True, False])
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: next(answers))
+
+    result = runner.invoke(app, ["rm", "Bastion"])
+
+    assert result.exit_code == 0
+    names = {s.name for s in load_servers()}
+    assert names == {"Bastion", "T1"}
+    t1 = next(s for s in load_servers() if s.id == "t-1")
+    assert t1.jump_host == "Bastion"
+
+
+def test_edit_rejects_cycle_at_save_time(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test setting jump_host that would create A→B→A cycle is rejected before save."""
+    save_servers(
+        [
+            Server(id="a-1", name="A", host="a.example", username="u", jump_host="B"),
+            Server(id="b-1", name="B", host="b.example", username="u"),
+        ]
+    )
+
+    class PickA:
+        def execute(self) -> str:
+            return "A"
+
+    prompt_values = iter(["B", "b.example", 22, "u"])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda text, **kw: text == "Use a jump host (ProxyJump)?")
+    monkeypatch.setattr("app.cli.inquirer.select", lambda **kw: PickA())
+
+    result = runner.invoke(app, ["edit", "B"])
+
+    assert result.exit_code == 1
+    assert "cycle detected" in result.stdout.lower()
+    # Nothing saved
+    b_after = next(s for s in load_servers() if s.id == "b-1")
+    assert b_after.jump_host is None
+
+
 def test_add_with_jump_flag_rejects_unknown_jump_host(
     runner: CliRunner,
     temp_config_dir: Path,

@@ -124,8 +124,15 @@ def resolve_existing_path(paths: list[str]) -> str | None:
 
 
 def import_ssh_config(config_path: Path) -> list[Server]:
-    """Import SSH hosts from a config file into server models."""
+    """Import SSH hosts from a config file into server models.
+
+    ProxyJump directives are imported only when the referenced target matches
+    another imported alias (case-insensitive). Inline ``user@host:port`` jump
+    specs are dropped since our model requires jump_host to reference a saved
+    server; a warning is attached via the jump_host field being left as None.
+    """
     aliases = collect_host_aliases(config_path)
+    alias_lookup = {alias.lower(): alias for alias in aliases}
     servers: list[Server] = []
 
     for alias in aliases:
@@ -145,6 +152,18 @@ def import_ssh_config(config_path: Path) -> list[Server]:
         key_path = resolve_existing_path(explicit_identity_files)
         certificate_path = resolve_existing_path(explicit_certificate_files)
 
+        # Resolve ProxyJump: keep only references that match another imported alias
+        jump_host: str | None = None
+        proxyjump_values = options.get("proxyjump", [])
+        if proxyjump_values:
+            raw = proxyjump_values[0].strip()
+            # Only handle single-hop alias references; skip "none" (ssh sentinel)
+            # and inline user@host:port specs (no corresponding saved server).
+            if raw.lower() not in {"", "none"} and "," not in raw and "@" not in raw and ":" not in raw:
+                resolved = alias_lookup.get(raw.lower())
+                if resolved:
+                    jump_host = resolved
+
         if not username:
             continue
 
@@ -156,6 +175,7 @@ def import_ssh_config(config_path: Path) -> list[Server]:
                 username=username,
                 key_path=key_path,
                 certificate_path=certificate_path,
+                jump_host=jump_host,
             )
         )
 
