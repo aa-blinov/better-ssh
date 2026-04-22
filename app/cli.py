@@ -60,18 +60,22 @@ def _print_no_servers_message() -> None:
 
 def _print_servers(servers: list[Server]) -> None:
     """Print servers table."""
+    show_via = any(s.jump_host for s in servers)
     table = Table(title="Servers")
     table.add_column("ID", style="dim", no_wrap=True)
     table.add_column("Pin", justify="center", no_wrap=True)
     table.add_column("Name", style="bold")
     table.add_column("Connection")
     table.add_column("Auth", justify="center", no_wrap=True)
-    table.add_column("Via", style="cyan", no_wrap=True)
+    if show_via:
+        table.add_column("Via", style="cyan", no_wrap=True)
 
     for s in _sort_servers(servers):
         auth = _auth_label(s)
-        via = s.jump_host or ""
-        table.add_row(s.id[:8], _favorite_label(s), s.name, f"{s.username}@{s.host}:{s.port}", auth, via)
+        row = [s.id[:8], _favorite_label(s), s.name, f"{s.username}@{s.host}:{s.port}", auth]
+        if show_via:
+            row.append(s.jump_host or "")
+        table.add_row(*row)
 
     console.print(table)
 
@@ -86,28 +90,70 @@ def _sort_servers(servers: list[Server]) -> list[Server]:
     return sorted(servers, key=sort_key)
 
 
-def _select_jump_host(candidates: list[Server], message: str) -> str | None:
-    """Interactively pick a jump host from candidate servers by name.
+_NONE_JUMP_SENTINEL = "__none__"
 
-    Returns the chosen server's name, or None if the user cancels or no
-    candidates are available.
+
+def _jump_host_usage_map(all_servers: list[Server]) -> dict[str, int]:
+    """Return {name: count} of how many servers use each name as jump_host."""
+    counts: dict[str, int] = {}
+    for s in all_servers:
+        if s.jump_host:
+            counts[s.jump_host] = counts.get(s.jump_host, 0) + 1
+    return counts
+
+
+def _select_jump_host(
+    candidates: list[Server],
+    message: str,
+    *,
+    include_none: bool = False,
+    current: str | None = None,
+    all_servers: list[Server] | None = None,
+) -> tuple[bool, str | None]:
+    """Interactively pick a jump host from candidates.
+
+    Returns (changed, new_value). changed=False means user cancelled or kept
+    the current value. new_value is the selected server name, or None when the
+    user picks "no jump host".
     """
     if not candidates:
-        console.print("[yellow]No other servers to use as jump host. Add one first.[/yellow]")
-        return None
+        console.print("[yellow]No other servers available as a jump host.[/yellow]")
+        console.print("Add one first with [cyan]bssh add[/cyan], then re-run this command.")
+        return False, current
+
+    usage = _jump_host_usage_map(all_servers or [])
+
+    def label(s: Server) -> str:
+        used_by = usage.get(s.name, 0)
+        # Don't count the server being edited as "using itself"
+        if current == s.name and used_by > 0:
+            used_by -= 1
+        suffix = f"  [used by {used_by}]" if used_by else ""
+        marker = " [current]" if current == s.name else ""
+        return f"{s.display()}{marker}{suffix}"
+
     sorted_candidates = _sort_servers(candidates)
+    choices: list[Choice] = []
+    if include_none:
+        choices.append(Choice(value=_NONE_JUMP_SENTINEL, name="(none — direct connection)"))
+    choices.extend(Choice(value=s.name, name=label(s)) for s in sorted_candidates)
+
     try:
-        name = inquirer.select(
+        picked = inquirer.select(
             message=message,
-            choices=[Choice(value=s.name, name=s.display()) for s in sorted_candidates],
+            choices=choices,
             cycle=True,
             vi_mode=False,
+            default=current if current else None,
             instruction="Use arrows to navigate, search by name",
         ).execute()
     except KeyboardInterrupt:
         console.print("\n[dim]Cancelled jump host selection.[/dim]")
-        return None
-    return name
+        return False, current
+
+    if picked == _NONE_JUMP_SENTINEL:
+        return (current is not None), None
+    return (picked != current), picked
 
 
 def _select_server(servers: list[Server], message: str) -> Server:
@@ -215,6 +261,7 @@ def add_server(
     host: str | None = typer.Option(None, prompt=True),
     port: int = typer.Option(22, prompt=True),
     username: str | None = typer.Option(None, prompt=True),
+    jump: str | None = typer.Option(None, "--jump", "-J", help="Use this saved server as ProxyJump"),
 ):
     """Add a new server."""
     try:
@@ -230,10 +277,22 @@ def add_server(
         if typer.confirm("Add password?", default=False):
             password = typer.prompt("Password", hide_input=True, confirmation_prompt=True) or None
 
+        existing_servers = storage.load_servers()
         jump_host: str | None = None
-        if typer.confirm("Use a jump host (ProxyJump)?", default=False):
-            existing = [s for s in storage.load_servers() if s.name != name]
-            jump_host = _select_jump_host(existing, "Select jump host:")
+        if jump:
+            # Non-interactive: validate reference
+            if not any(s.name == jump for s in existing_servers):
+                console.print(f"[red]Jump host '{jump}' not found in saved servers.[/red]")
+                raise typer.Exit(1)
+            jump_host = jump
+        elif typer.confirm("Use a jump host (ProxyJump)?", default=False):
+            candidates = [s for s in existing_servers if s.name != name]
+            _, jump_host = _select_jump_host(
+                candidates,
+                "Select jump host:",
+                include_none=False,
+                all_servers=existing_servers,
+            )
 
         server = Server(
             name=name,
@@ -298,6 +357,16 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
             console.print("[red]Server not found[/red]")
             raise typer.Exit(1)
 
+    # Warn if this server is used as a jump host by others
+    all_servers = storage.load_servers()
+    used_by = [s.name for s in all_servers if s.jump_host == srv.name and s.id != srv.id]
+    if used_by:
+        label = "server uses" if len(used_by) == 1 else "servers use"
+        console.print(
+            f"[yellow]Note:[/yellow] {len(used_by)} {label} this as a jump host: [cyan]{', '.join(used_by)}[/cyan]"
+        )
+        console.print("[dim]Renaming will update their references automatically.[/dim]")
+
     try:
         name = typer.prompt("Name", default=srv.name)
         host = typer.prompt("Host", default=srv.host)
@@ -339,15 +408,24 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         jump_host = srv.jump_host
         if srv.jump_host:
             if typer.confirm(f"Change jump host? [{srv.jump_host}]", default=False):
-                if typer.confirm("Clear jump host (use direct connection)?", default=False):
-                    jump_host = None
-                else:
-                    candidates = [s for s in storage.load_servers() if s.name != srv.name]
-                    jump_host = _select_jump_host(candidates, "Select jump host:") or srv.jump_host
+                candidates = [s for s in all_servers if s.name != srv.name]
+                _, jump_host = _select_jump_host(
+                    candidates,
+                    "Select jump host:",
+                    include_none=True,
+                    current=srv.jump_host,
+                    all_servers=all_servers,
+                )
         elif typer.confirm("Use a jump host (ProxyJump)?", default=False):
-            candidates = [s for s in storage.load_servers() if s.name != srv.name]
-            jump_host = _select_jump_host(candidates, "Select jump host:")
+            candidates = [s for s in all_servers if s.name != srv.name]
+            _, jump_host = _select_jump_host(
+                candidates,
+                "Select jump host:",
+                include_none=False,
+                all_servers=all_servers,
+            )
 
+        old_name = srv.name
         srv.name = name
         srv.host = host
         srv.port = port
@@ -356,8 +434,22 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         srv.certificate_path = certificate_path or None
         srv.password = password
         srv.jump_host = jump_host
-        storage.upsert_server(srv)
-        console.print("[green]Saved.[/green]")
+
+        # Cascade rename: update jump_host references in other servers
+        if old_name != name and used_by:
+            for other in all_servers:
+                if other.id != srv.id and other.jump_host == old_name:
+                    other.jump_host = name
+            # Replace this server in the list, save all
+            all_servers = [s if s.id != srv.id else srv for s in all_servers]
+            storage.save_servers(all_servers)
+            console.print(
+                f"[green]Saved.[/green] Updated {len(used_by)} jump-host reference(s): "
+                f"[cyan]{old_name}[/cyan] → [cyan]{name}[/cyan]"
+            )
+        else:
+            storage.upsert_server(srv)
+            console.print("[green]Saved.[/green]")
     except (KeyboardInterrupt, typer.Abort):
         console.print("\n[dim]Cancelled.[/dim]")
         raise typer.Exit(0)
