@@ -84,3 +84,59 @@ def test_import_ssh_config_resolves_identity_files(
     assert servers[1].name == "db"
     assert servers[1].key_path is None
     assert servers[1].certificate_path is None
+
+
+def test_import_ssh_config_resolves_proxyjump_to_sibling_alias(
+    temp_ssh_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test ProxyJump <alias> is imported as jump_host when the alias is another imported host."""
+    config_file = temp_ssh_dir / "config"
+    config_file.write_text("Host bastion prod\n", encoding="utf-8")
+
+    outputs = {
+        "bastion": "host bastion\nhostname bastion.example.com\nuser ops\nport 22",
+        "prod": "host prod\nhostname prod.example.com\nuser deploy\nport 22\nproxyjump bastion",
+    }
+
+    def fake_run(command, check, capture_output, text):
+        alias = command[2]
+        config_path = command[4]
+        output = outputs[alias] if config_path == str(config_file) else outputs[alias].split("\nproxyjump")[0]
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr("app.ssh_config.shutil.which", lambda _: "ssh")
+    monkeypatch.setattr("app.ssh_config.subprocess.run", fake_run)
+
+    servers = import_ssh_config(config_file)
+
+    by_name = {s.name: s for s in servers}
+    assert by_name["bastion"].jump_host is None
+    assert by_name["prod"].jump_host == "bastion"
+
+
+def test_import_ssh_config_skips_inline_proxyjump_spec(
+    temp_ssh_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test inline user@host:port ProxyJump is skipped (no matching saved server)."""
+    config_file = temp_ssh_dir / "config"
+    config_file.write_text("Host prod\n", encoding="utf-8")
+
+    outputs = {
+        "prod": "host prod\nhostname prod.example.com\nuser deploy\nport 22\nproxyjump ops@external.example.com:22",
+    }
+
+    def fake_run(command, check, capture_output, text):
+        alias = command[2]
+        config_path = command[4]
+        output = outputs[alias] if config_path == str(config_file) else outputs[alias].split("\nproxyjump")[0]
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr("app.ssh_config.shutil.which", lambda _: "ssh")
+    monkeypatch.setattr("app.ssh_config.subprocess.run", fake_run)
+
+    servers = import_ssh_config(config_file)
+
+    assert len(servers) == 1
+    assert servers[0].jump_host is None

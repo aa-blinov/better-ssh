@@ -93,6 +93,32 @@ def _sort_servers(servers: list[Server]) -> list[Server]:
 _NONE_JUMP_SENTINEL = "__none__"
 
 
+def _check_jump_cycle(servers: list[Server], server: Server) -> str | None:
+    """Walk the prospective jump chain for `server` over `servers`.
+
+    Returns a human-readable error message if a cycle or missing reference
+    would result, or None if the chain is valid.
+    """
+    if not server.jump_host:
+        return None
+    by_name = {s.name: s for s in servers if s.id != server.id}
+    by_name[server.name] = server  # consider the prospective state
+    seen = {server.name}
+    current = server.jump_host
+    chain = [server.name]
+    while current:
+        if current in seen:
+            chain.append(current)
+            return f"Jump host cycle detected: {' → '.join(chain)}"
+        jump = by_name.get(current)
+        if jump is None:
+            return f"Jump host '{current}' not found in saved servers"
+        seen.add(current)
+        chain.append(current)
+        current = jump.jump_host
+    return None
+
+
 def _jump_host_usage_map(all_servers: list[Server]) -> dict[str, int]:
     """Return {name: count} of how many servers use each name as jump_host."""
     counts: dict[str, int] = {}
@@ -303,6 +329,12 @@ def add_server(
             key_path=key_path,
             jump_host=jump_host,
         )
+
+        error = _check_jump_cycle(existing_servers, server)
+        if error:
+            console.print(f"[red]{error}[/red]")
+            raise typer.Exit(1)
+
         storage.upsert_server(server)
         console.print(f"[green]Added:[/green] {server.display()}  (id: {server.id})")
     except (KeyboardInterrupt, typer.Abort):
@@ -328,9 +360,35 @@ def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (
             console.print("[red]Server not found[/red]")
             raise typer.Exit(1)
 
+    # Check if this server is used as a jump host by others
+    all_servers = storage.load_servers()
+    dependents = [s for s in all_servers if s.jump_host == srv.name and s.id != srv.id]
+
     try:
         if not typer.confirm(f"Remove '{srv.name}' ({srv.username}@{srv.host}:{srv.port})?"):
             raise typer.Exit(0)
+
+        if dependents:
+            label = "server references" if len(dependents) == 1 else "servers reference"
+            console.print(
+                f"[yellow]Warning:[/yellow] {len(dependents)} {label} "
+                f"this as a jump host: [cyan]{', '.join(s.name for s in dependents)}[/cyan]"
+            )
+            if not typer.confirm(
+                "Clear jump_host on those servers so they connect directly?",
+                default=True,
+            ):
+                console.print("[dim]Cancelled.[/dim]")
+                raise typer.Exit(0)
+            # Clear dependents' jump_host and save them alongside the removal
+            remaining = [s for s in all_servers if s.id != srv.id]
+            for dep in remaining:
+                if dep.jump_host == srv.name:
+                    dep.jump_host = None
+            storage.save_servers(remaining)
+            console.print(f"[green]Removed.[/green] Cleared jump_host on {len(dependents)} dependent server(s).")
+            return
+
         ok = storage.remove_server(srv.id)
         if ok:
             console.print("[green]Removed.[/green]")
@@ -434,6 +492,19 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         srv.certificate_path = certificate_path or None
         srv.password = password
         srv.jump_host = jump_host
+
+        # Validate the prospective jump chain before saving
+        prospective = [s if s.id != srv.id else srv for s in all_servers]
+        # If we're renaming, dependents' jump_host will be updated — simulate that
+        if old_name != name:
+            for other in prospective:
+                if other.id != srv.id and other.jump_host == old_name:
+                    other.jump_host = name
+        error = _check_jump_cycle(prospective, srv)
+        if error:
+            console.print(f"[red]{error}[/red]")
+            console.print("[dim]No changes saved.[/dim]")
+            raise typer.Exit(1)
 
         # Cascade rename: update jump_host references in other servers
         if old_name != name and used_by:
