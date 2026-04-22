@@ -19,6 +19,7 @@ A command-line tool for managing SSH connections with an interactive interface, 
   - [Port Forwarding](#port-forwarding)
   - [File Transfer (put / get)](#file-transfer-put--get)
   - [X11 Forwarding](#x11-forwarding)
+  - [Parallel Command Broadcast](#parallel-command-broadcast)
   - [Exporting Back to SSH Config](#exporting-back-to-ssh-config)
   - [Viewing a Single Server](#viewing-a-single-server)
 - [Jump Hosts (ProxyJump)](#jump-hosts-proxyjump)
@@ -47,6 +48,7 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Optional X11 forwarding per server (`ssh -X`)
 - File transfer (`bssh put` / `bssh get`) that reuses a server's stored profile
 - Round-trip with OpenSSH config: `bssh isc` imports Host blocks; `bssh esc` exports them back
+- Parallel command broadcast (`bssh exec`) across matched servers with per-host colored output
 - Free-form notes and tags attached to each server
 - Detailed per-server card view (`bssh view <name>`)
 - Time-sorted "recents" list (`bssh recent`) with a relative `Last used` column
@@ -168,6 +170,7 @@ Commands:
   decrypt             Disable password encryption.    Alias: dec
   edit                Edit a server.                  Alias: e
   encrypt             Enable password encryption.     Alias: enc
+  exec                Run a command on one or more servers in parallel.
   encryption-status   Show encryption status.         Alias: es
   export              Export servers to JSON file.    Alias: ex
   export-ssh-config   Export servers to SSH config.   Alias: esc
@@ -391,6 +394,34 @@ The importer resolves each host through `ssh -G`, so `Host *`, `Include`, explic
 
 Default OpenSSH keys remain implicit. If a host works with plain `ssh host` because of default keys or `ssh-agent`, `bssh` will keep using that behavior without pinning a key path unless your SSH config explicitly does so.
 
+### Parallel Command Broadcast
+
+`bssh exec` runs a single shell command on every server matched by a query, in parallel, with a per-host colored prefix on each output line and an aggregated summary at the end.
+
+```bash
+bssh exec "uptime" prod           # every server matched by the 'prod' query
+bssh exec "df -h /" --all         # every saved server
+bssh exec "systemctl is-active nginx" web --timeout 15
+```
+
+The query matches the same fields as `bssh ls` / shorthand connect: name, host, username, tag, id prefix, or jump host. Use `--all` to skip the filter.
+
+Flag reference:
+
+| Flag | Purpose | Default |
+| --- | --- | --- |
+| `--all` | Run on every saved server instead of filtering | off |
+| `--timeout <seconds>` | Per-host overall timeout (remote command is killed after) | 30 |
+| `--connect-timeout <seconds>` | TCP connect timeout (`ssh -o ConnectTimeout`) | 10 |
+
+Each host's stdout lines are tagged with `[<name>]` in its own color, stderr lines are red, and a `(<duration>, ok)` or `(<duration>, exit N)` status line closes each host's output. The summary reports how many hosts succeeded, e.g. `Summary: 8/10 ok in 2.3s`. Exit code is 0 only when every host returned 0 without a connection-level error.
+
+**Known caveats:**
+
+- Runs use `ssh -o BatchMode=yes` to avoid interleaved password prompts from parallel runs. Password-only servers will fail fast with a clear auth error — use key or certificate auth (or ssh-agent) for `exec`.
+- Port forwards and X11 forwarding on the server profile are ignored here (they're interactive-connection features).
+- No concurrency cap in v1; every matched server gets its own `ssh` process. Fine up to low hundreds of hosts.
+
 ### Exporting Back to SSH Config
 
 The reverse operation — turn every saved server into `Host` blocks that native OpenSSH tooling (`ssh`/`scp`/`rsync`/`git`/IDEs) can read directly:
@@ -570,6 +601,7 @@ uv run pytest --cov=app --cov-report=html       # with coverage report
 - `tests/test_ssh.py` — SSH command and availability tests
 - `tests/test_ssh_config.py` — SSH config importer tests
 - `tests/test_transfer.py` — put / get scp wrapper tests
+- `tests/test_exec_cmd.py` — parallel broadcast command tests
 - `tests/test_cli.py` — CLI commands and interface tests
 
 **Source Layout:**
@@ -589,9 +621,10 @@ app/
     manage.py       add, edit, remove, view
     organize.py     list, pin, unpin
     crypto.py       encrypt, decrypt, encryption-status
-    backup.py       export, import, import-ssh-config
+    backup.py       export, import, import-ssh-config, export-ssh-config
     health.py       ping, health
     transfer.py     put, get (scp wrappers)
+    exec_cmd.py     exec (parallel broadcast)
 ```
 
 ### Submitting Changes

@@ -39,6 +39,7 @@ from ..ssh_config import get_default_ssh_config_path, import_ssh_config
 from . import backup as _backup  # noqa: F401
 from . import connection as _connection  # noqa: F401
 from . import crypto as _crypto  # noqa: F401
+from . import exec_cmd as _exec_cmd  # noqa: F401
 from . import health as _health  # noqa: F401
 from . import manage as _manage  # noqa: F401
 from . import organize as _organize  # noqa: F401
