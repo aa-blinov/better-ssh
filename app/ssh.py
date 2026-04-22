@@ -118,6 +118,12 @@ def connect(server: Server, copy_password: bool = True, all_servers: list[Server
             "ServerAliveCountMax=3",
         ]
 
+    # Port forwards: local (-L), remote (-R), dynamic/SOCKS (-D). Render each
+    # via Forward.to_ssh_spec so bind-host handling stays in one place.
+    for fwd in server.forwards:
+        flag = {"local": "-L", "remote": "-R", "dynamic": "-D"}[fwd.type]
+        cmd += [flag, fwd.to_ssh_spec()]
+
     # ProxyJump chain
     if server.jump_host:
         try:

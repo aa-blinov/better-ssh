@@ -7,7 +7,7 @@ import socket
 import pyperclip
 import pytest
 
-from app.models import Server
+from app.models import Forward, Server
 from app.ssh import (
     JumpResolutionError,
     _clipboard_failure_message,
@@ -473,3 +473,118 @@ def test_connect_reports_jump_resolution_error(monkeypatch, capsys):
 
     assert rc == 1
     assert commands == []
+
+
+# ---------------------------------------------------------------------------
+# Port forwarding (-L, -R, -D)
+# ---------------------------------------------------------------------------
+
+
+def test_connect_adds_local_port_forward(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(
+        name="app",
+        host="app.example",
+        username="deploy",
+        forwards=[Forward(type="local", local_port=5432, remote_host="localhost", remote_port=5432)],
+    )
+    connect(server, copy_password=False)
+
+    cmd = commands[0]
+    assert "-L" in cmd
+    assert "5432:localhost:5432" in cmd
+
+
+def test_connect_adds_remote_port_forward(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(
+        name="app",
+        host="app.example",
+        username="deploy",
+        forwards=[Forward(type="remote", local_port=9000, remote_host="internal", remote_port=9000)],
+    )
+    connect(server, copy_password=False)
+
+    cmd = commands[0]
+    assert "-R" in cmd
+    assert "9000:internal:9000" in cmd
+
+
+def test_connect_adds_dynamic_socks_forward(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(
+        name="app",
+        host="app.example",
+        username="deploy",
+        forwards=[Forward(type="dynamic", local_port=1080)],
+    )
+    connect(server, copy_password=False)
+
+    cmd = commands[0]
+    assert "-D" in cmd
+    assert "1080" in cmd
+
+
+def test_connect_preserves_bind_host_in_forward_spec(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(
+        name="app",
+        host="app.example",
+        username="deploy",
+        forwards=[
+            Forward(type="local", bind_host="127.0.0.1", local_port=8080, remote_host="web", remote_port=80),
+        ],
+    )
+    connect(server, copy_password=False)
+
+    assert "127.0.0.1:8080:web:80" in commands[0]
+
+
+def test_connect_emits_all_forwards_in_order(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(
+        name="app",
+        host="app.example",
+        username="deploy",
+        forwards=[
+            Forward(type="local", local_port=5432, remote_host="db", remote_port=5432),
+            Forward(type="dynamic", local_port=1080),
+        ],
+    )
+    connect(server, copy_password=False)
+
+    cmd = commands[0]
+    l_index = cmd.index("-L")
+    d_index = cmd.index("-D")
+    assert l_index < d_index  # preserved order
+    assert cmd[l_index + 1] == "5432:db:5432"
+    assert cmd[d_index + 1] == "1080"
+
+
+def test_connect_without_forwards_does_not_emit_forward_flags(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(name="app", host="app.example", username="deploy")
+    connect(server, copy_password=False)
+
+    cmd = commands[0]
+    assert "-L" not in cmd
+    assert "-R" not in cmd
+    assert "-D" not in cmd
