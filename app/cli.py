@@ -328,11 +328,12 @@ def add_server(
 
         jump_host: str | None = None
         if jump:
-            # Non-interactive: validate reference
-            if not any(s.name == jump for s in existing_servers):
+            # Non-interactive: validate reference (case-insensitive, like name uniqueness)
+            match = next((s for s in existing_servers if s.name.lower() == jump.lower()), None)
+            if match is None:
                 console.print(f"[red]Jump host '{jump}' not found in saved servers.[/red]")
                 raise typer.Exit(1)
-            jump_host = jump
+            jump_host = match.name  # store the canonical casing
         elif typer.confirm("Use a jump host (ProxyJump)?", default=False):
             candidates = [s for s in existing_servers if s.name != name]
             _, jump_host = _select_jump_host(
