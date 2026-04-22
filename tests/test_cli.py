@@ -11,7 +11,7 @@ import typer
 from InquirerPy.base.control import Choice as InquirerChoice
 from typer.testing import CliRunner
 
-from app.cli import app
+from app.cli import _NONE_JUMP_SENTINEL, app
 from app.encryption import encrypt_password
 from app.models import Server
 from app.storage import get_or_create_encryption_salt, load_servers, save_servers, save_settings
@@ -585,7 +585,7 @@ def test_edit_existing_jump_host_can_be_cleared(
     temp_config_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Test edit: a server with jump_host can clear it back to direct connection."""
+    """Test edit: a server with jump_host can clear it back via (none) sentinel."""
     save_servers(
         [
             Server(id="b-1", name="Bastion", host="b.example", username="ops"),
@@ -594,11 +594,17 @@ def test_edit_existing_jump_host_can_be_cleared(
     )
 
     prompt_values = iter(["Target", "t.example", 22, "u"])
+
+    class FakePrompt:
+        def execute(self) -> str:
+            return _NONE_JUMP_SENTINEL
+
     monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
     monkeypatch.setattr(
         "app.cli.typer.confirm",
-        lambda text, **kw: text.startswith(("Change jump host?", "Clear jump host")),
+        lambda text, **kw: text.startswith("Change jump host?"),
     )
+    monkeypatch.setattr("app.cli.inquirer.select", lambda **kw: FakePrompt())
 
     result = runner.invoke(app, ["edit", "Target"])
 
@@ -624,6 +630,125 @@ def test_list_shows_via_column_for_jump_host(
     assert result.exit_code == 0
     assert "Via" in result.stdout
     assert "Bastion" in result.stdout
+
+
+def test_list_hides_via_column_when_no_jump_hosts(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test ls hides the 'Via' column when no server has jump_host set."""
+    save_servers(
+        [
+            Server(id="a-1", name="AlphaOnly", host="a.example", username="u"),
+            Server(id="b-1", name="BetaOnly", host="b.example", username="u"),
+        ]
+    )
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # No "Via" header should appear
+    assert "Via" not in result.stdout
+
+
+def test_rename_cascades_to_jump_host_references(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test renaming a server used as jump_host updates all referencing servers."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="T1", host="t1.example", username="u", jump_host="Bastion"),
+            Server(id="t-2", name="T2", host="t2.example", username="u", jump_host="Bastion"),
+        ]
+    )
+
+    # User renames Bastion -> NewBastion, declines all other prompts
+    prompt_values = iter(["NewBastion", "b.example", 22, "ops"])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "Bastion"])
+
+    assert result.exit_code == 0
+    servers = {s.id: s for s in load_servers()}
+    assert servers["b-1"].name == "NewBastion"
+    assert servers["t-1"].jump_host == "NewBastion"
+    assert servers["t-2"].jump_host == "NewBastion"
+
+
+def test_edit_warns_when_server_used_as_jump_host(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit prints a warning when the server is used as a jump host by others."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="Target", host="t.example", username="u", jump_host="Bastion"),
+        ]
+    )
+
+    prompt_values = iter(["Bastion", "b.example", 22, "ops"])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "Bastion"])
+
+    assert result.exit_code == 0
+    assert "1 server uses this as a jump host" in result.stdout
+    assert "Target" in result.stdout
+
+
+def test_add_with_jump_flag_sets_jump_host_without_prompt(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --jump <name> sets jump_host non-interactively and skips the confirm."""
+    save_servers([Server(id="b-1", name="Bastion", host="b.example", username="ops")])
+
+    confirms: list[str] = []
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: confirms.append(text) or False,
+    )
+    monkeypatch.setattr(
+        "app.cli.inquirer.select",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("select must not be called with --jump")),
+    )
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Target", "--host", "t.example", "--port", "22", "--username", "u", "--jump", "Bastion"],
+    )
+
+    assert result.exit_code == 0
+    assert "Use a jump host (ProxyJump)?" not in confirms
+    added = next(s for s in load_servers() if s.name == "Target")
+    assert added.jump_host == "Bastion"
+
+
+def test_add_with_jump_flag_rejects_unknown_jump_host(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --jump <unknown-name> fails with an error instead of silently saving a bad reference."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Target", "--host", "t.example", "--port", "22", "--username", "u", "--jump", "Ghost"],
+    )
+
+    assert result.exit_code == 1
+    assert "Jump host 'Ghost' not found" in result.stdout
 
 
 def test_pin_command_marks_server_as_favorite(cli_with_servers: CliRunner):
