@@ -432,11 +432,33 @@ uv run pytest --cov=app --cov-report=html       # with coverage report
 **Test Structure:**
 
 - `tests/test_models.py` — Server model tests
+- `tests/test_domain.py` — Pure domain helpers (tag parsing, name uniqueness, jump-chain validation, sort/filter)
 - `tests/test_encryption.py` — Encryption/decryption tests
 - `tests/test_storage.py` — Configuration persistence tests
 - `tests/test_ssh.py` — SSH command and availability tests
 - `tests/test_ssh_config.py` — SSH config importer tests
 - `tests/test_cli.py` — CLI commands and interface tests
+
+**Source Layout:**
+
+```text
+app/
+  models.py         Pydantic Server model
+  domain.py         Pure logic (sort/filter, validation, tag parsing, jump-chain walking)
+  storage.py        JSON file I/O with transparent encryption layering
+  encryption.py     Fernet + PBKDF2 key derivation from an SSH key
+  ssh.py            OpenSSH command construction, jump resolution, availability check
+  ssh_config.py     ~/.ssh/config importer via `ssh -G`
+  cli/
+    __init__.py     Package entry: builds the Typer app, re-exports for tests
+    _shared.py      Typer app instance, Console, pickers, common helpers
+    connection.py   connect, copy-pass, show-pass + root callback
+    manage.py       add, edit, remove, view
+    organize.py     list, pin, unpin
+    crypto.py       encrypt, decrypt, encryption-status
+    backup.py       export, import, import-ssh-config
+    health.py       ping, health
+```
 
 ### Submitting Changes
 
