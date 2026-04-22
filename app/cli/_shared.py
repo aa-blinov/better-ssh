@@ -15,8 +15,8 @@ from InquirerPy.base.control import Choice
 from rich.console import Console
 from rich.table import Table
 
-from ..domain import auth_label, favorite_label, jump_host_usage_map, sort_servers
-from ..models import Server
+from ..domain import auth_label, favorite_label, jump_host_usage_map, parse_forward_spec, sort_servers
+from ..models import Forward, Server
 
 
 class OrderCommands(typer.core.TyperGroup):
@@ -63,6 +63,7 @@ def _print_servers(servers: list[Server]) -> None:
     """Print servers table."""
     show_via = any(s.jump_host for s in servers)
     show_keepalive = any(s.keep_alive_interval for s in servers)
+    show_forwards = any(s.forwards for s in servers)
     show_tags = any(s.tags for s in servers)
     show_notes = any(s.notes for s in servers)
     table = Table(title="Servers")
@@ -75,6 +76,8 @@ def _print_servers(servers: list[Server]) -> None:
         table.add_column("Via", style="cyan", no_wrap=True)
     if show_keepalive:
         table.add_column("Alive", style="green", justify="right", no_wrap=True)
+    if show_forwards:
+        table.add_column("Fwd", style="blue", justify="right", no_wrap=True)
     if show_tags:
         table.add_column("Tags", style="magenta", max_width=30, overflow="fold")
     if show_notes:
@@ -87,6 +90,8 @@ def _print_servers(servers: list[Server]) -> None:
             row.append(s.jump_host or "")
         if show_keepalive:
             row.append(f"{s.keep_alive_interval}s" if s.keep_alive_interval else "")
+        if show_forwards:
+            row.append(str(len(s.forwards)) if s.forwards else "")
         if show_tags:
             row.append(", ".join(s.tags) if s.tags else "")
         if show_notes:
@@ -192,6 +197,60 @@ def _select_server(servers: list[Server], message: str) -> Server:
         console.print("[red]Failed to identify server[/red]")
         raise typer.Exit(1)
     return server
+
+
+def _parse_forward_flags(
+    local_specs: list[str] | None,
+    remote_specs: list[str] | None,
+    dynamic_specs: list[str] | None,
+) -> list[Forward]:
+    """Convert the raw -L / -R / -D flag lists into Forward objects.
+
+    Surfaces any parser ValueError as a red CLI error and exits 1, so the
+    caller doesn't need a try/except.
+    """
+    result: list[Forward] = []
+    for kind, specs in (("local", local_specs), ("remote", remote_specs), ("dynamic", dynamic_specs)):
+        for spec in specs or []:
+            try:
+                result.append(parse_forward_spec(spec, kind))
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(1)
+    return result
+
+
+def _prompt_forwards_interactively() -> list[Forward]:
+    """Interactively collect port-forward specs until the user picks (done)."""
+    forwards: list[Forward] = []
+    while True:
+        try:
+            kind = inquirer.select(
+                message="Add a port forward?",
+                choices=[
+                    Choice(value="local", name="Local  -L  (port → remote host:port)"),
+                    Choice(value="remote", name="Remote -R  (remote port → local host:port)"),
+                    Choice(value="dynamic", name="Dynamic -D  (SOCKS proxy on local port)"),
+                    Choice(value="__done__", name="(done)"),
+                ],
+                cycle=True,
+                vi_mode=False,
+            ).execute()
+        except KeyboardInterrupt:
+            console.print("\n[dim]Cancelled forward configuration.[/dim]")
+            break
+        if kind == "__done__":
+            break
+        if kind == "dynamic":
+            spec = typer.prompt("Local port (or bind:port)")
+        else:
+            label = "Local" if kind == "local" else "Remote"
+            spec = typer.prompt(f"{label} forward spec (port:host:port or bind:port:host:port)")
+        try:
+            forwards.append(parse_forward_spec(spec, kind))
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+    return forwards
 
 
 def _merge_servers_by_name(existing_servers: list[Server], imported_servers: list[Server]) -> list[Server]:

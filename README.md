@@ -16,6 +16,7 @@ A command-line tool for managing SSH connections with an interactive interface, 
   - [Filtering the Server List](#filtering-the-server-list)
   - [Adding Servers Non-Interactively](#adding-servers-non-interactively)
   - [Server Notes, Tags, and Keep-Alive](#server-notes-tags-and-keep-alive)
+  - [Port Forwarding](#port-forwarding)
   - [Viewing a Single Server](#viewing-a-single-server)
 - [Jump Hosts (ProxyJump)](#jump-hosts-proxyjump)
 - [Configuration](#configuration)
@@ -39,6 +40,7 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Support for SSH private key and certificate authentication
 - ProxyJump support — connect through a bastion host (or a chain of hosts)
 - Optional SSH keep-alive per server (ServerAliveInterval)
+- Per-server port forwarding presets (local `-L`, remote `-R`, dynamic SOCKS `-D`)
 - Free-form notes and tags attached to each server
 - Detailed per-server card view (`bssh view <name>`)
 - Server management (add, edit, remove, list)
@@ -232,6 +234,9 @@ Flag reference:
 | `--keep-alive <seconds>` | `-K` | `ServerAliveInterval` in seconds; `0` leaves it disabled |
 | `--notes <text>` | — | Free-form note attached to the server |
 | `--tag <value>` | `-t` | Tag (repeatable: `-t prod -t db`) |
+| `-L <spec>` | — | Local forward, repeatable: `-L [bind:]port:host:port` |
+| `-R <spec>` | — | Remote forward, repeatable: `-R [bind:]port:host:port` |
+| `-D <spec>` | — | Dynamic SOCKS forward, repeatable: `-D [bind:]port` |
 
 Passing an empty string (`--key ""`, `--notes ""`) stores `None` — useful when a script wants to be explicit about clearing a field.
 
@@ -258,6 +263,37 @@ Three optional per-server fields surface as columns in the `ls` table when at le
 - **Keep-Alive** — a `ServerAliveInterval` value in seconds. When set, `bssh connect` passes `-o ServerAliveInterval=<N> -o ServerAliveCountMax=3` to OpenSSH, preventing NAT/idle disconnects (`Alive` column, e.g. `60s`). Enter `0` at the prompt (or `--keep-alive 0`) to leave it disabled.
 
 All three columns are auto-hidden when no server has a value set.
+
+### Port Forwarding
+
+`bssh` stores per-server port-forward presets and passes them to OpenSSH automatically on every `bssh connect`. Three forwarding types are supported, matching OpenSSH flags:
+
+| Type | Flag | Example | Meaning |
+| --- | --- | --- | --- |
+| Local | `-L` | `-L 5432:localhost:5432` | Forward local port 5432 to `localhost:5432` on the remote side (typical: tunnel a remote DB to your laptop). |
+| Remote | `-R` | `-R 9000:internal:9000` | Forward remote port 9000 back to `internal:9000` on your network (typical: expose a local service to the remote host). |
+| Dynamic | `-D` | `-D 1080` | Open a SOCKS proxy on local port 1080 that routes through the server. |
+
+All three accept an optional bind address (e.g. `127.0.0.1:5432:localhost:5432`).
+
+Non-interactive provisioning:
+
+```bash
+bssh add --name prod-db --host 10.0.0.5 --username deploy \
+  -L 5432:localhost:5432 \
+  -L 6379:redis-internal:6379 \
+  -D 1080
+```
+
+Interactive flow: `bssh add` and `bssh edit` ask "Configure port forwards?" — picking yes opens a small loop where you choose local/remote/dynamic and enter a spec, repeating until you pick `(done)`.
+
+Editing an existing server's forwards:
+
+- Passing any `-L`/`-R`/`-D` flag to `bssh edit` **replaces** the entire forwards list (consistent with `--tag`).
+- `bssh edit <name> --no-forwards` clears all forwards.
+- Passing no forward-related flags keeps the existing list and opens the interactive prompt when no other flags trigger non-interactive mode.
+
+`bssh ls` shows a `Fwd` column with the count (hidden when nobody has any). `bssh view <name>` lists each forward on its own line.
 
 ### Viewing a Single Server
 
