@@ -1035,6 +1035,41 @@ def test_edit_without_jump_host_offers_to_add_one(
     assert updated.jump_host == "TestServer2"
 
 
+def test_none_jump_sentinel_cannot_collide_with_server_name(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test a server literally named '__none__' is distinguishable from the (none) sentinel."""
+    # A unique object sentinel guarantees no string server name can shadow it.
+    assert not isinstance(_NONE_JUMP_SENTINEL, str)
+
+    # Save a server whose name is the legacy sentinel string; verify the picker
+    # treats it as a normal candidate and selecting it stores the name, not None.
+    save_servers(
+        [
+            Server(id="n-1", name="__none__", host="none.example", username="u"),
+            Server(id="t-1", name="Target", host="t.example", username="u"),
+        ]
+    )
+
+    class PickStringNone:
+        def execute(self) -> str:
+            return "__none__"
+
+    prompt_values = iter(["Target", "t.example", 22, "u"])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda text, **kw: text == "Use a jump host (ProxyJump)?")
+    monkeypatch.setattr("app.cli.inquirer.select", lambda **kw: PickStringNone())
+
+    result = runner.invoke(app, ["edit", "Target"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "t-1")
+    # The string "__none__" must be stored as a real jump_host, not treated as the sentinel
+    assert updated.jump_host == "__none__"
+
+
 def test_edit_existing_jump_host_can_be_cleared(
     runner: CliRunner,
     temp_config_dir: Path,

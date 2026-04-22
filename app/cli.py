@@ -100,7 +100,10 @@ def _sort_servers(servers: list[Server]) -> list[Server]:
     return sorted(servers, key=sort_key)
 
 
-_NONE_JUMP_SENTINEL = "__none__"
+# Sentinel for the "(none — direct connection)" option in the jump-host
+# picker. Using None here (rather than a magic string) guarantees no
+# collision with any user-chosen server name, which must be a non-empty str.
+_NONE_JUMP_SENTINEL: object = object()
 
 
 def _prompt_keep_alive_interval(default: int) -> int | None:
@@ -214,7 +217,7 @@ def _select_jump_host(
         console.print("\n[dim]Cancelled jump host selection.[/dim]")
         return False, current
 
-    if picked == _NONE_JUMP_SENTINEL:
+    if picked is _NONE_JUMP_SENTINEL:
         return (current is not None), None
     return (picked != current), picked
 
