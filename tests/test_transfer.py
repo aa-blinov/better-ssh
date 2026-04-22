@@ -62,6 +62,56 @@ def test_put_honors_recursive_and_compress_flags(
     assert "-C" in captured[0]
 
 
+def test_put_with_preserve_flag_emits_scp_p(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --preserve/-p adds scp's lowercase -p alongside the existing uppercase -P port flag."""
+    save_servers([Server(id="s-1", name="Srv", host="h.example", username="u", port=2222)])
+    captured = _patch_scp_capture(monkeypatch)
+
+    result = runner.invoke(app, ["put", "Srv", "./f", "/remote/f", "-p"])
+
+    assert result.exit_code == 0
+    cmd = captured[0]
+    # Both the lowercase preserve flag and the uppercase port flag must be present
+    assert "-p" in cmd
+    assert "-P" in cmd
+    # port follows -P, not -p
+    assert cmd[cmd.index("-P") + 1] == "2222"
+
+
+def test_get_with_preserve_flag_emits_scp_p(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --preserve/-p works on get too."""
+    save_servers([Server(id="s-1", name="Srv", host="h.example", username="u")])
+    captured = _patch_scp_capture(monkeypatch)
+
+    result = runner.invoke(app, ["get", "Srv", "/remote/f", "./f", "--preserve"])
+
+    assert result.exit_code == 0
+    assert "-p" in captured[0]
+
+
+def test_put_without_preserve_flag_omits_scp_p(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test omitting --preserve means no `-p` is passed (default scp behavior)."""
+    save_servers([Server(id="s-1", name="Srv", host="h.example", username="u")])
+    captured = _patch_scp_capture(monkeypatch)
+
+    result = runner.invoke(app, ["put", "Srv", "./f", "/remote/f"])
+
+    assert result.exit_code == 0
+    assert "-p" not in captured[0]
+
+
 def test_put_passes_key_and_certificate(
     runner: CliRunner,
     temp_config_dir: Path,
