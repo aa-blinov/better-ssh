@@ -8,6 +8,7 @@ import time
 
 import pyperclip
 from rich.console import Console
+from rich.markup import escape
 
 from .models import Server
 
@@ -129,7 +130,7 @@ def connect(server: Server, copy_password: bool = True, all_servers: list[Server
         try:
             chain = resolve_jump_chain(server, all_servers or [])
         except JumpResolutionError as exc:
-            console.print(f"[red]Jump host error: {exc}[/red]")
+            console.print(f"[red]Jump host error:[/red] {escape(str(exc))}")
             return 1
         jump_spec = ",".join(f"{j.username}@{j.host}:{j.port}" for j in chain)
         cmd += ["-J", jump_spec]
@@ -140,13 +141,15 @@ def connect(server: Server, copy_password: bool = True, all_servers: list[Server
         cmd += ["-o", f"CertificateFile={server.certificate_path}"]
     cmd += [f"{server.username}@{server.host}"]
 
-    console.print(f"[cyan]SSH: {' '.join(cmd)}[/cyan]")
+    # `cmd` contains user-provided strings (username, host, paths, forward
+    # specs); escape before printing so Rich renders brackets literally.
+    console.print(f"[cyan]SSH:[/cyan] {escape(' '.join(cmd))}")
     try:
         return subprocess.call(cmd)  # noqa: S603
     except KeyboardInterrupt:
         return 130
     except Exception as e:
-        console.print(f"[red]SSH execution error: {e}[/red]")
+        console.print(f"[red]SSH execution error:[/red] {escape(str(e))}")
         return 1
 
 
