@@ -885,6 +885,27 @@ def test_edit_rejects_cycle_at_save_time(
     assert b_after.jump_host is None
 
 
+def test_add_with_jump_flag_matches_case_insensitively(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --jump resolves names case-insensitively and stores the canonical casing."""
+    save_servers([Server(id="b-1", name="Bastion", host="b.example", username="ops")])
+
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Target", "--host", "t.example", "--port", "22", "--username", "u", "--jump", "BASTION"],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "Target")
+    assert added.jump_host == "Bastion"  # canonical casing stored, not "BASTION"
+
+
 def test_add_with_jump_flag_rejects_unknown_jump_host(
     runner: CliRunner,
     temp_config_dir: Path,
