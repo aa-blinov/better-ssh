@@ -537,7 +537,28 @@ def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (
 
 @app.command("edit", help="Edit a server. Alias: e")
 @app.command("e", hidden=True)
-def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+def edit(
+    query: str | None = typer.Argument(None, help="ID/name/partial name (optional)"),
+    name_opt: str | None = typer.Option(None, "--name", help="Rename the server"),
+    host_opt: str | None = typer.Option(None, "--host", help="New host"),
+    port_opt: int | None = typer.Option(None, "--port", help="New port", min=1, max=65535),
+    username_opt: str | None = typer.Option(None, "--username", help="New username"),
+    key: str | None = typer.Option(None, "--key", help="SSH private key path (empty string clears)"),
+    certificate: str | None = typer.Option(None, "--certificate", help="SSH certificate path (empty string clears)"),
+    password_flag: str | None = typer.Option(
+        None,
+        "--password",
+        help="Password (empty string clears; WARNING: visible in shell history)",
+    ),
+    jump: str | None = typer.Option(
+        None, "--jump", "-J", help="Saved server name to use as ProxyJump (empty string clears)"
+    ),
+    keep_alive: int | None = typer.Option(
+        None, "--keep-alive", "-K", help="Keep-alive interval in seconds (0 disables)", min=0
+    ),
+    note: str | None = typer.Option(None, "--notes", help="Free-form note (empty string clears)"),
+    tag: list[str] | None = typer.Option(None, "--tag", "-t", help="Tag (repeatable; replaces existing tags)"),
+):
     """Edit a server."""
     if query is None:
         servers = storage.load_servers()
@@ -562,91 +583,133 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         console.print("[dim]Renaming will update their references automatically.[/dim]")
 
     try:
-        name = typer.prompt("Name", default=srv.name)
+        # Name
+        if name_opt is not None:
+            name = name_opt
+        else:
+            name = typer.prompt("Name", default=srv.name)
         if name != srv.name:
             conflict = _name_conflict(name, all_servers, exclude_id=srv.id)
             if conflict:
                 console.print(f"[red]A server named '{conflict.name}' already exists (id: {conflict.id[:8]}).[/red]")
                 console.print("[dim]No changes saved.[/dim]")
                 raise typer.Exit(1)
-        host = typer.prompt("Host", default=srv.host)
-        port = typer.prompt("Port", default=srv.port, type=int)
-        username = typer.prompt("Username", default=srv.username)
 
-        key_path = srv.key_path
-        if srv.key_path:
-            if typer.confirm(f"Change key path? [{srv.key_path}]", default=False):
-                key_path = typer.prompt("New key path (empty to clear)", default="", show_default=False) or None
+        # Host / Port / Username
+        host = host_opt if host_opt is not None else typer.prompt("Host", default=srv.host)
+        port = port_opt if port_opt is not None else typer.prompt("Port", default=srv.port, type=int)
+        username = username_opt if username_opt is not None else typer.prompt("Username", default=srv.username)
+
+        # Key path
+        if key is not None:
+            key_path = key or None
         else:
-            if typer.confirm("Add key path?", default=False):
+            key_path = srv.key_path
+            if srv.key_path:
+                if typer.confirm(f"Change key path? [{srv.key_path}]", default=False):
+                    key_path = typer.prompt("New key path (empty to clear)", default="", show_default=False) or None
+            elif typer.confirm("Add key path?", default=False):
                 key_path = typer.prompt("Key path", show_default=False) or None
 
-        certificate_path = srv.certificate_path
-        if srv.certificate_path:
-            if typer.confirm(f"Change certificate path? [{srv.certificate_path}]", default=False):
-                certificate_path = (
-                    typer.prompt("New certificate path (empty to clear)", default="", show_default=False) or None
-                )
+        # Certificate path
+        if certificate is not None:
+            certificate_path = certificate or None
         else:
-            if typer.confirm("Add certificate path?", default=False):
+            certificate_path = srv.certificate_path
+            if srv.certificate_path:
+                if typer.confirm(f"Change certificate path? [{srv.certificate_path}]", default=False):
+                    certificate_path = (
+                        typer.prompt("New certificate path (empty to clear)", default="", show_default=False) or None
+                    )
+            elif typer.confirm("Add certificate path?", default=False):
                 certificate_path = typer.prompt("Certificate path", show_default=False) or None
 
-        password = srv.password
-        if srv.password:
-            if typer.confirm("Change password?", default=False):
-                password = typer.prompt(
-                    "New password (empty to clear)",
-                    default="",
-                    hide_input=True,
-                    show_default=False,
-                    confirmation_prompt=True,
-                )
-                password = password or None
-        elif typer.confirm("Add password?", default=False):
-            password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
+        # Password
+        if password_flag is not None:
+            password = password_flag or None
+        else:
+            password = srv.password
+            if srv.password:
+                if typer.confirm("Change password?", default=False):
+                    password = typer.prompt(
+                        "New password (empty to clear)",
+                        default="",
+                        hide_input=True,
+                        show_default=False,
+                        confirmation_prompt=True,
+                    )
+                    password = password or None
+            elif typer.confirm("Add password?", default=False):
+                password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
 
-        jump_host = srv.jump_host
-        if srv.jump_host:
-            if typer.confirm(f"Change jump host? [{srv.jump_host}]", default=False):
+        # Jump host
+        if jump is not None:
+            if jump == "":
+                jump_host = None
+            else:
+                match = next((s for s in all_servers if s.id != srv.id and s.name.lower() == jump.lower()), None)
+                if match is None:
+                    console.print(f"[red]Jump host '{jump}' not found in saved servers.[/red]")
+                    console.print("[dim]No changes saved.[/dim]")
+                    raise typer.Exit(1)
+                jump_host = match.name
+        else:
+            jump_host = srv.jump_host
+            if srv.jump_host:
+                if typer.confirm(f"Change jump host? [{srv.jump_host}]", default=False):
+                    candidates = [s for s in all_servers if s.name != srv.name]
+                    _, jump_host = _select_jump_host(
+                        candidates,
+                        "Select jump host:",
+                        include_none=True,
+                        current=srv.jump_host,
+                        all_servers=all_servers,
+                    )
+            elif typer.confirm("Use a jump host (ProxyJump)?", default=False):
                 candidates = [s for s in all_servers if s.name != srv.name]
                 _, jump_host = _select_jump_host(
                     candidates,
                     "Select jump host:",
-                    include_none=True,
-                    current=srv.jump_host,
+                    include_none=False,
                     all_servers=all_servers,
                 )
-        elif typer.confirm("Use a jump host (ProxyJump)?", default=False):
-            candidates = [s for s in all_servers if s.name != srv.name]
-            _, jump_host = _select_jump_host(
-                candidates,
-                "Select jump host:",
-                include_none=False,
-                all_servers=all_servers,
-            )
 
-        notes = srv.notes
-        if srv.notes:
-            if typer.confirm(f"Change note? [{srv.notes[:40]}{'...' if len(srv.notes) > 40 else ''}]", default=False):
-                notes = typer.prompt("New note (empty to clear)", default="", show_default=False) or None
-        elif typer.confirm("Add a note?", default=False):
-            notes = typer.prompt("Note") or None
+        # Notes
+        if note is not None:
+            notes = note or None
+        else:
+            notes = srv.notes
+            if srv.notes:
+                if typer.confirm(
+                    f"Change note? [{srv.notes[:40]}{'...' if len(srv.notes) > 40 else ''}]", default=False
+                ):
+                    notes = typer.prompt("New note (empty to clear)", default="", show_default=False) or None
+            elif typer.confirm("Add a note?", default=False):
+                notes = typer.prompt("Note") or None
 
-        keep_alive_interval = srv.keep_alive_interval
-        if srv.keep_alive_interval:
-            if typer.confirm(f"Change keep-alive interval? [{srv.keep_alive_interval}s]", default=False):
-                keep_alive_interval = _prompt_keep_alive_interval(srv.keep_alive_interval)
-        elif typer.confirm("Enable SSH keep-alive?", default=False):
-            keep_alive_interval = _prompt_keep_alive_interval(60)
+        # Keep-alive
+        if keep_alive is not None:
+            keep_alive_interval = keep_alive if keep_alive > 0 else None
+        else:
+            keep_alive_interval = srv.keep_alive_interval
+            if srv.keep_alive_interval:
+                if typer.confirm(f"Change keep-alive interval? [{srv.keep_alive_interval}s]", default=False):
+                    keep_alive_interval = _prompt_keep_alive_interval(srv.keep_alive_interval)
+            elif typer.confirm("Enable SSH keep-alive?", default=False):
+                keep_alive_interval = _prompt_keep_alive_interval(60)
 
-        tags = srv.tags
-        if srv.tags:
-            if typer.confirm(f"Change tags? [{', '.join(srv.tags)}]", default=False):
-                tags = _parse_tags(
-                    typer.prompt("New comma-separated tags (empty to clear)", default="", show_default=False)
-                )
-        elif typer.confirm("Add tags?", default=False):
-            tags = _parse_tags(typer.prompt("Comma-separated tags"))
+        # Tags
+        if tag is not None:
+            tags = _parse_tags(",".join(tag))
+        else:
+            tags = srv.tags
+            if srv.tags:
+                if typer.confirm(f"Change tags? [{', '.join(srv.tags)}]", default=False):
+                    tags = _parse_tags(
+                        typer.prompt("New comma-separated tags (empty to clear)", default="", show_default=False)
+                    )
+            elif typer.confirm("Add tags?", default=False):
+                tags = _parse_tags(typer.prompt("Comma-separated tags"))
 
         old_name = srv.name
         srv.name = name
