@@ -169,6 +169,7 @@ Commands:
   list                Show list of servers.           Alias: ls
   pin                 Pin a server to the top of lists.
   ping                Check server availability.      Alias: p
+  recent              Show recently used servers.     Alias: r
   remove              Remove a server.                Alias: rm
   show-pass           Show password.                  Alias: sp
   unpin               Remove a server from pinned favorites.
@@ -180,6 +181,8 @@ Run `bssh` without a subcommand to open the interactive connect menu immediately
 Run `bssh <query>` to connect directly when the match is unique. If the query is ambiguous or missing, the tool falls back to an interactive menu.
 
 Use `bssh pin <query>` to keep critical hosts above the normal recent/frequent ordering, and `bssh unpin <query>` to remove them from favorites.
+
+`bssh recent` (alias `r`) lists servers by most-recently-connected, newest first — independent of pin status. Cap the list with `--limit N` / `-n N` (default 10). Servers that were never connected via `bssh` don't appear.
 
 Most commands work without arguments and will present an interactive menu.
 

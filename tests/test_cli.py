@@ -1523,6 +1523,120 @@ def test_add_with_keep_alive_flag_zero_leaves_disabled(
     assert added.keep_alive_interval is None
 
 
+def test_recent_command_sorts_by_last_used_newest_first(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh recent` orders servers by last_used_at descending, regardless of pin status."""
+    save_servers(
+        [
+            Server(
+                id="old",
+                name="Old",
+                host="old.example",
+                username="u",
+                last_used_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+            ),
+            Server(
+                id="new",
+                name="New",
+                host="new.example",
+                username="u",
+                last_used_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
+            ),
+            # Pinned but never used — should NOT show up in recent.
+            Server(id="unused-pin", name="Pinned", host="p.example", username="u", favorite=True),
+        ]
+    )
+
+    result = runner.invoke(app, ["recent"])
+
+    assert result.exit_code == 0
+    stdout = result.stdout
+    assert "New" in stdout
+    assert "Old" in stdout
+    # "Pinned" never connected -> omitted from the time-sorted list
+    assert "Pinned" not in stdout
+    # Newer server appears before older one in the rendered output
+    assert stdout.index("New") < stdout.index("Old")
+
+
+def test_recent_command_respects_limit(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh recent --limit N` truncates to N rows."""
+    save_servers(
+        [
+            Server(
+                id=f"s-{i}",
+                name=f"Srv{i}",
+                host=f"h{i}.example",
+                username="u",
+                last_used_at=datetime(2026, 4, i + 1, 12, 0, tzinfo=UTC),
+            )
+            for i in range(5)
+        ]
+    )
+
+    result = runner.invoke(app, ["recent", "--limit", "2"])
+
+    assert result.exit_code == 0
+    # Newest two (Srv4, Srv3) must be present
+    assert "Srv4" in result.stdout
+    assert "Srv3" in result.stdout
+    # Older ones must be clipped
+    assert "Srv0" not in result.stdout
+    assert "Srv1" not in result.stdout
+
+
+def test_recent_command_short_flag_and_alias(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `-n` short flag and `r` alias both work for recent."""
+    save_servers(
+        [
+            Server(
+                id="s-1",
+                name="Srv",
+                host="h.example",
+                username="u",
+                last_used_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
+            )
+        ]
+    )
+
+    result = runner.invoke(app, ["r", "-n", "5"])
+
+    assert result.exit_code == 0
+    assert "Srv" in result.stdout
+
+
+def test_recent_command_no_used_servers_shows_friendly_message(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh recent` prints a helpful message when no server has ever been connected."""
+    save_servers([Server(id="s-1", name="Fresh", host="h.example", username="u")])
+
+    result = runner.invoke(app, ["recent"])
+
+    assert result.exit_code == 0
+    assert "No recent connections yet" in result.stdout
+
+
+def test_recent_command_empty_state(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh recent` on an empty list shows the same empty-state as ls."""
+    result = runner.invoke(app, ["recent"])
+
+    assert result.exit_code == 0
+    assert "No servers found" in result.stdout
+
+
 def test_list_shows_alive_column_when_any_server_has_keep_alive(
     runner: CliRunner,
     temp_config_dir: Path,

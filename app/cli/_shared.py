@@ -60,14 +60,25 @@ def _print_no_servers_message() -> None:
     console.print(NO_SERVERS_MESSAGE)
 
 
-def _print_servers(servers: list[Server]) -> None:
-    """Print servers table."""
+def _print_servers(
+    servers: list[Server],
+    *,
+    sort: bool = True,
+    title: str = "Servers",
+) -> None:
+    """Print servers table.
+
+    When ``sort`` is True (default) rows are re-ordered via ``sort_servers``
+    (pinned first, then recent, then frequent, then name). Pass ``sort=False``
+    to preserve the caller's order — e.g. `bssh recent` passes a time-sorted
+    list and must not reshuffle favorites to the top.
+    """
     show_via = any(s.jump_host for s in servers)
     show_keepalive = any(s.keep_alive_interval for s in servers)
     show_forwards = any(s.forwards for s in servers)
     show_tags = any(s.tags for s in servers)
     show_notes = any(s.notes for s in servers)
-    table = Table(title="Servers")
+    table = Table(title=title)
     table.add_column("ID", style="dim", no_wrap=True)
     table.add_column("Pin", justify="center", no_wrap=True)
     table.add_column("Name", style="bold")
@@ -84,7 +95,8 @@ def _print_servers(servers: list[Server]) -> None:
     if show_notes:
         table.add_column("Notes", style="dim", max_width=40, overflow="ellipsis")
 
-    for s in sort_servers(servers):
+    rows = sort_servers(servers) if sort else servers
+    for s in rows:
         auth = auth_label(s)
         # Escape every user-provided string before it reaches the Rich table;
         # otherwise a server named "[red]evil[/red]" (or similar) would be

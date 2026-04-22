@@ -10,6 +10,35 @@ from ..domain import servers_matching_query
 from ._shared import _print_no_servers_message, _print_servers, _select_server, app, console
 
 
+@app.command("recent", help="Show recently used servers, newest first. Alias: r.")
+@app.command("r", hidden=True)
+def recent_servers(
+    limit: int = typer.Option(10, "--limit", "-n", help="Max servers to show", min=1),
+) -> None:
+    """Show servers sorted by most recently used, ignoring pin status.
+
+    Pulls last_used_at timestamps that `connect` records on successful runs
+    and presents them newest first. Pinned favorites appear in their actual
+    recent position (not forced to the top), which is what users expect from
+    a time-based list.
+    """
+    servers = storage.load_servers()
+    if not servers:
+        _print_no_servers_message()
+        return
+
+    used = [s for s in servers if s.last_used_at is not None]
+    if not used:
+        console.print(
+            "[yellow]No recent connections yet.[/yellow] "
+            "Connect once with [cyan]bssh <name>[/cyan] to populate the list."
+        )
+        return
+
+    used.sort(key=lambda s: s.last_used_at, reverse=True)
+    _print_servers(used[:limit], sort=False, title=f"Recent {min(limit, len(used))} of {len(used)}")
+
+
 @app.command("list", help="Show list of servers. Alias: ls. Optional query filters by name/host/user/tag.")
 @app.command("ls", hidden=True)
 def list_servers(
