@@ -125,8 +125,10 @@ def connect(server: Server, copy_password: bool = True, all_servers: list[Server
         flag = {"local": "-L", "remote": "-R", "dynamic": "-D"}[fwd.type]
         cmd += [flag, fwd.to_ssh_spec()]
 
-    # X11 forwarding: add the trusted-safe -X flag when the user opted in.
-    # Power users who need -Y can still configure it via ~/.ssh/config.
+    # X11 forwarding: emit `-X` (untrusted mode — the SAFER variant) when
+    # the user opted in. Some X11 apps misbehave under the SECURITY extension
+    # and need trusted mode (`ssh -Y`) instead; users who hit that can enable
+    # it via `ForwardX11Trusted yes` in ~/.ssh/config.
     if server.x11_forwarding:
         cmd += ["-X"]
 
