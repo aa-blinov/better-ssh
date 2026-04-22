@@ -518,6 +518,124 @@ def test_add_with_empty_flag_values_stores_none(
     assert added.notes is None
 
 
+def test_edit_with_flags_applies_them_without_prompts(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit flags set fields non-interactively and skip the matching prompts."""
+    save_servers(
+        [Server(id="e-1", name="Server", host="old.example", username="old", tags=["old"], keep_alive_interval=30)]
+    )
+
+    prompts: list[str] = []
+    confirms: list[str] = []
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: prompts.append(text) or "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda text, **kw: confirms.append(text) or False)
+
+    result = runner.invoke(
+        app,
+        [
+            "edit",
+            "Server",
+            "--host",
+            "new.example",
+            "--port",
+            "2222",
+            "--username",
+            "newuser",
+            "--notes",
+            "scripted",
+            "--keep-alive",
+            "0",
+            "-t",
+            "prod",
+            "-t",
+            "db",
+        ],
+    )
+
+    assert result.exit_code == 0
+    # All relevant prompts / confirms must have been skipped by the flags
+    assert "Host" not in prompts
+    assert "Port" not in prompts
+    assert "Username" not in prompts
+    assert not any(c.startswith("Change note?") for c in confirms)
+    assert not any(c.startswith("Change keep-alive") for c in confirms)
+    assert not any(c.startswith("Change tags?") for c in confirms)
+
+    updated = next(s for s in load_servers() if s.id == "e-1")
+    assert updated.host == "new.example"
+    assert updated.port == 2222
+    assert updated.username == "newuser"
+    assert updated.notes == "scripted"
+    assert updated.keep_alive_interval is None
+    assert updated.tags == ["prod", "db"]
+
+
+def test_edit_with_jump_flag_empty_clears_jump_host(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --jump '' clears the jump host non-interactively (mirrors picker's (none))."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="Target", host="t.example", username="u", jump_host="Bastion"),
+        ]
+    )
+
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "Target", "--jump", ""])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "t-1")
+    assert updated.jump_host is None
+
+
+def test_edit_with_jump_flag_resolves_case_insensitively(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --jump BASTION stores the canonical casing, matching add's behavior."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="Target", host="t.example", username="u"),
+        ]
+    )
+
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "Target", "--jump", "BASTION"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "t-1")
+    assert updated.jump_host == "Bastion"
+
+
+def test_edit_with_jump_flag_unknown_rejected(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --jump <unknown> fails cleanly without modifying state."""
+    save_servers([Server(id="t-1", name="Target", host="t.example", username="u")])
+
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "Target", "--jump", "Ghost"])
+
+    assert result.exit_code == 1
+    assert "Jump host 'Ghost' not found" in result.stdout
+
+
 def test_add_with_tag_flag_stores_tags(
     runner: CliRunner,
     temp_config_dir: Path,
