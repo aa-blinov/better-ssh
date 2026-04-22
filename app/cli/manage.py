@@ -12,7 +12,9 @@ from ..encryption import find_ssh_key
 from ..models import Server
 from ..ssh import JumpResolutionError, resolve_jump_chain
 from ._shared import (
+    _parse_forward_flags,
     _print_no_servers_message,
+    _prompt_forwards_interactively,
     _prompt_keep_alive_interval,
     _select_jump_host,
     _select_server,
@@ -45,6 +47,15 @@ def add_server(
     ),
     note: str | None = typer.Option(None, "--notes", help="Free-form note attached to the server"),
     tag: list[str] | None = typer.Option(None, "--tag", "-t", help="Tag (repeatable: -t prod -t db)"),
+    local_forward: list[str] | None = typer.Option(
+        None, "-L", help="Local forward (repeatable): [bind:]port:host:port"
+    ),
+    remote_forward: list[str] | None = typer.Option(
+        None, "-R", help="Remote forward (repeatable): [bind:]port:host:port"
+    ),
+    dynamic_forward: list[str] | None = typer.Option(
+        None, "-D", help="Dynamic SOCKS forward (repeatable): [bind:]port"
+    ),
 ):
     """Add a new server."""
     try:
@@ -110,6 +121,13 @@ def add_server(
         elif typer.confirm("Enable SSH keep-alive?", default=False):
             keep_alive_interval = _prompt_keep_alive_interval(60)
 
+        if local_forward or remote_forward or dynamic_forward:
+            forwards = _parse_forward_flags(local_forward, remote_forward, dynamic_forward)
+        elif typer.confirm("Configure port forwards?", default=False):
+            forwards = _prompt_forwards_interactively()
+        else:
+            forwards = []
+
         server = Server(
             name=name,
             host=host,
@@ -122,6 +140,7 @@ def add_server(
             notes=notes,
             keep_alive_interval=keep_alive_interval,
             tags=tags,
+            forwards=forwards,
         )
 
         error = check_jump_cycle(existing_servers, server)
@@ -159,6 +178,12 @@ def edit(
     ),
     note: str | None = typer.Option(None, "--notes", help="Free-form note (empty string clears)"),
     tag: list[str] | None = typer.Option(None, "--tag", "-t", help="Tag (repeatable; replaces existing tags)"),
+    local_forward: list[str] | None = typer.Option(
+        None, "-L", help="Local forward (repeatable; any -L/-R/-D flag replaces existing forwards)"
+    ),
+    remote_forward: list[str] | None = typer.Option(None, "-R", help="Remote forward (repeatable)"),
+    dynamic_forward: list[str] | None = typer.Option(None, "-D", help="Dynamic SOCKS forward (repeatable)"),
+    clear_forwards: bool = typer.Option(False, "--no-forwards", help="Clear all port forwards"),
 ):
     """Edit a server."""
     if query is None:
@@ -302,6 +327,22 @@ def edit(
             elif typer.confirm("Add tags?", default=False):
                 tags = parse_tags(typer.prompt("Comma-separated tags"))
 
+        if clear_forwards:
+            forwards = []
+        elif local_forward or remote_forward or dynamic_forward:
+            forwards = _parse_forward_flags(local_forward, remote_forward, dynamic_forward)
+        else:
+            forwards = srv.forwards
+            if srv.forwards:
+                summary = ", ".join(f.display() for f in srv.forwards)
+                if typer.confirm(
+                    f"Change port forwards? [{summary[:60]}{'...' if len(summary) > 60 else ''}]",
+                    default=False,
+                ):
+                    forwards = _prompt_forwards_interactively()
+            elif typer.confirm("Configure port forwards?", default=False):
+                forwards = _prompt_forwards_interactively()
+
         old_name = srv.name
         srv.name = name
         srv.host = host
@@ -314,6 +355,7 @@ def edit(
         srv.notes = notes
         srv.keep_alive_interval = keep_alive_interval
         srv.tags = tags
+        srv.forwards = forwards
 
         prospective = [s if s.id != srv.id else srv for s in all_servers]
         if old_name != name:
@@ -448,6 +490,10 @@ def view(query: str | None = typer.Argument(None, help="ID/name/partial name (op
 
     if srv.keep_alive_interval:
         table.add_row("Keep-alive", f"[green]{srv.keep_alive_interval}s[/green]")
+
+    if srv.forwards:
+        lines = "\n".join(f.display() for f in srv.forwards)
+        table.add_row("Forwards", f"[blue]{lines}[/blue]")
 
     if srv.tags:
         table.add_row("Tags", "[magenta]" + ", ".join(srv.tags) + "[/magenta]")

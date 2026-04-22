@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 
 from app.cli import _NONE_JUMP_SENTINEL, _prompt_keep_alive_interval, app
 from app.encryption import encrypt_password
-from app.models import Server
+from app.models import Forward, Server
 from app.storage import get_or_create_encryption_salt, is_encryption_enabled, load_servers, save_servers, save_settings
 
 
@@ -1058,6 +1058,190 @@ def test_edit_with_jump_flag_unknown_rejected(
     assert "Jump host 'Ghost' not found" in result.stdout
 
 
+def test_add_with_forward_flags_parses_and_stores(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test -L/-R/-D flags populate server.forwards non-interactively."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        [
+            "add",
+            "--name",
+            "Fwd",
+            "--host",
+            "f.example",
+            "--port",
+            "22",
+            "--username",
+            "u",
+            "-L",
+            "5432:localhost:5432",
+            "-R",
+            "9000:internal:9000",
+            "-D",
+            "1080",
+        ],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "Fwd")
+    assert len(added.forwards) == 3
+    assert added.forwards[0].type == "local"
+    assert added.forwards[0].local_port == 5432
+    assert added.forwards[1].type == "remote"
+    assert added.forwards[2].type == "dynamic"
+
+
+def test_add_with_malformed_forward_spec_exits_with_error(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test a malformed -L spec surfaces the parser's error and aborts."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Bad", "--host", "b.example", "--port", "22", "--username", "u", "-L", "nope"],
+    )
+
+    assert result.exit_code == 1
+    assert "Invalid local forward" in result.stdout
+    assert load_servers() == []
+
+
+def test_edit_with_forward_flags_replaces_existing_forwards(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test passing any -L/-R/-D to edit replaces the existing forwards list."""
+    save_servers(
+        [
+            Server(
+                id="f-1",
+                name="F",
+                host="f.example",
+                username="u",
+                forwards=[
+                    Forward(type="local", local_port=5432, remote_host="db", remote_port=5432),
+                ],
+            )
+        ]
+    )
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "F", "-D", "1080"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "f-1")
+    assert len(updated.forwards) == 1
+    assert updated.forwards[0].type == "dynamic"
+    assert updated.forwards[0].local_port == 1080
+
+
+def test_edit_with_no_forwards_flag_clears_forwards(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --no-forwards wipes the existing forwards list."""
+    save_servers(
+        [
+            Server(
+                id="f-1",
+                name="F",
+                host="f.example",
+                username="u",
+                forwards=[Forward(type="dynamic", local_port=1080)],
+            )
+        ]
+    )
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "F", "--no-forwards"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "f-1")
+    assert updated.forwards == []
+
+
+def test_list_shows_fwd_column_when_any_server_has_forwards(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test ls shows a 'Fwd' column with the count when forwards are configured."""
+    save_servers(
+        [
+            Server(
+                id="f-1",
+                name="WithFwd",
+                host="h.example",
+                username="u",
+                forwards=[
+                    Forward(type="local", local_port=5432, remote_host="db", remote_port=5432),
+                    Forward(type="dynamic", local_port=1080),
+                ],
+            ),
+            Server(id="p-1", name="Plain", host="p.example", username="u"),
+        ]
+    )
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    assert "Fwd" in result.stdout
+    assert "2" in result.stdout  # forward count
+
+
+def test_list_hides_fwd_column_when_no_forwards(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test ls hides the 'Fwd' column when no server has forwards set."""
+    save_servers([Server(id="p-1", name="Plain", host="p.example", username="u")])
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    assert "Fwd" not in result.stdout
+
+
+def test_view_shows_forwards_section(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test view renders each forward as a labeled row in the panel."""
+    save_servers(
+        [
+            Server(
+                id="f-1",
+                name="Fwd",
+                host="h.example",
+                username="u",
+                forwards=[
+                    Forward(type="local", local_port=5432, remote_host="db", remote_port=5432),
+                    Forward(type="dynamic", local_port=1080),
+                ],
+            )
+        ]
+    )
+
+    result = runner.invoke(app, ["view", "Fwd"])
+
+    assert result.exit_code == 0
+    assert "Forwards" in result.stdout
+    assert "5432" in result.stdout
+    assert "1080" in result.stdout
+
+
 def test_add_with_tag_flag_stores_tags(
     runner: CliRunner,
     temp_config_dir: Path,
@@ -1596,6 +1780,7 @@ def test_edit_no_key_shows_confirm_not_path_prompt(
         "Add a note?",
         "Enable SSH keep-alive?",
         "Add tags?",
+        "Configure port forwards?",
     ]
     # No key/cert path prompts — user declined via confirm
     assert not any("path" in p.lower() for p in prompt_calls)
@@ -1635,6 +1820,7 @@ def test_edit_existing_password_does_not_ask_clear_password(
         "Change note? [Production web server]",
         "Enable SSH keep-alive?",
         "Change tags? [prod, web]",
+        "Configure port forwards?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-001")
@@ -1670,6 +1856,7 @@ def test_edit_existing_key_path_can_be_cleared(
         "Add a note?",
         "Enable SSH keep-alive?",
         "Change tags? [dev]",
+        "Configure port forwards?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-002")
