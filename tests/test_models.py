@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from app.models import Server
+from app.models import Forward, Server
 
 
 def test_server_defaults():
@@ -83,3 +83,61 @@ def test_server_display_marks_pinned_servers():
 
     display = server.display()
     assert display.startswith("[pin] PinnedServer")
+
+
+# ---------------------------------------------------------------------------
+# Forward
+# ---------------------------------------------------------------------------
+
+
+def test_forward_local_to_ssh_spec_without_bind():
+    fwd = Forward(type="local", local_port=5432, remote_host="localhost", remote_port=5432)
+    assert fwd.to_ssh_spec() == "5432:localhost:5432"
+
+
+def test_forward_local_to_ssh_spec_with_bind():
+    fwd = Forward(type="local", bind_host="127.0.0.1", local_port=8080, remote_host="web", remote_port=80)
+    assert fwd.to_ssh_spec() == "127.0.0.1:8080:web:80"
+
+
+def test_forward_dynamic_to_ssh_spec_without_bind():
+    fwd = Forward(type="dynamic", local_port=1080)
+    assert fwd.to_ssh_spec() == "1080"
+
+
+def test_forward_dynamic_to_ssh_spec_with_bind():
+    fwd = Forward(type="dynamic", bind_host="127.0.0.1", local_port=1080)
+    assert fwd.to_ssh_spec() == "127.0.0.1:1080"
+
+
+def test_forward_display_local_and_remote_use_arrow():
+    local = Forward(type="local", local_port=5432, remote_host="db", remote_port=5432)
+    remote = Forward(type="remote", local_port=80, remote_host="inside", remote_port=8080)
+    assert local.display() == "L 5432→db:5432"
+    assert remote.display() == "R 80→inside:8080"
+
+
+def test_forward_display_dynamic_shows_port_only():
+    fwd = Forward(type="dynamic", local_port=1080)
+    assert fwd.display() == "D 1080"
+
+
+def test_server_forwards_default_is_empty_list():
+    server = Server(name="S", host="h", username="u")
+    assert server.forwards == []
+
+
+def test_server_forwards_roundtrip_via_model_validate():
+    """Forwards survive JSON serialization/deserialization."""
+    original = Server(
+        name="S",
+        host="h",
+        username="u",
+        forwards=[
+            Forward(type="local", local_port=5432, remote_host="db", remote_port=5432),
+            Forward(type="dynamic", local_port=1080),
+        ],
+    )
+    data = original.model_dump(mode="json")
+    restored = Server.model_validate(data)
+    assert restored.forwards == original.forwards
