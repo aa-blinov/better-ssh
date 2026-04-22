@@ -13,6 +13,7 @@ A command-line tool for managing SSH connections with an interactive interface, 
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
+- [Jump Hosts (ProxyJump)](#jump-hosts-proxyjump)
 - [Configuration](#configuration)
 - [Password Encryption](#password-encryption)
 - [Platform Support](#platform-support)
@@ -206,6 +207,49 @@ Servers can be identified by:
 - Full name (case-insensitive)
 - Partial name match
 - Server ID prefix
+
+Names are unique (case-insensitive): adding or renaming to a name already in use is rejected with an error pointing at the existing entry.
+
+## Jump Hosts (ProxyJump)
+
+`bssh` supports connecting through one or more bastion hosts using OpenSSH's `ProxyJump` (`-J`). A jump host is just another saved server referenced by name.
+
+### Setting a jump host
+
+During `bssh add`, after the basic fields, the tool asks:
+
+```text
+Use a jump host (ProxyJump)? [y/N]
+```
+
+Confirming opens a picker over your other saved servers. The picker marks the current selection and shows how many other servers already use each candidate as a jump host.
+
+For non-interactive use (scripts, automation), pass the name directly:
+
+```bash
+bssh add --name prod --host prod.example --username deploy --jump bastion
+# short form
+bssh add --name prod --host prod.example --username deploy -J bastion
+```
+
+Reference matching is case-insensitive; the canonical casing from the saved server is stored.
+
+### Editing and removal
+
+- `bssh edit` always shows "Change jump host?" when one is set, opening the picker with a `(none — direct connection)` option first.
+- Renaming a server used as a jump host by others **automatically updates** all referencing servers in one save.
+- `bssh rm` warns when the target is used as a jump host by others and offers to clear `jump_host` on those dependents (default yes). Declining aborts the removal entirely.
+- Cycles (`A → B → A`) and unknown references are rejected at save time, not silently accepted.
+
+### Importing from `~/.ssh/config`
+
+`bssh isc` reads the `ProxyJump` directive and sets `jump_host` when the referenced target matches another imported alias (case-insensitive).
+
+### Known limitations
+
+- **Bastion auth is not forwarded into `ssh -J`.** We pass only `user@host:port` for each hop; OpenSSH resolves credentials for the bastion through its own mechanisms (`~/.ssh/config`, `ssh-agent`, default keys). A `key_path` or `password` saved on the bastion entry in `bssh` is **not** used during a jump connection — if the bastion needs a specific key, declare it via `IdentityFile` in `~/.ssh/config` or add it to `ssh-agent`. This is a limitation of `ssh -J` itself, not `bssh`.
+- **Password clipboard covers only the target**, not the bastion. You'll be prompted for the bastion's password separately during connection.
+- **Multi-hop `ProxyJump h1,h2` and inline `user@host:port`** specs in `~/.ssh/config` are **skipped** during import. Only single-hop alias references to other imported hosts are preserved. Set multi-hop chains manually by adding each bastion as its own server and chaining `jump_host` references.
 
 ## Configuration
 
