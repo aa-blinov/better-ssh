@@ -5,14 +5,17 @@ from __future__ import annotations
 import socket
 
 import pyperclip
+import pytest
 
 from app.models import Server
 from app.ssh import (
+    JumpResolutionError,
     _clipboard_failure_message,
     _paste_hint,
     check_server_availability,
     connect,
     has_ssh,
+    resolve_jump_chain,
 )
 
 # ---------------------------------------------------------------------------
@@ -353,3 +356,91 @@ def test_check_availability_uses_server_host_and_port(monkeypatch):
     check_server_availability(Server(name="s", host="custom.host", username="u", port=2222))
 
     assert sock.connected_to == ("custom.host", 2222)
+
+
+# ---------------------------------------------------------------------------
+# ProxyJump / jump host resolution
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_jump_chain_no_jump_returns_empty():
+    """Test server without jump_host yields an empty chain."""
+    target = Server(name="target", host="t.example", username="u")
+    assert resolve_jump_chain(target, [target]) == []
+
+
+def test_resolve_jump_chain_single_hop():
+    """Test single jump host is resolved to one-element chain."""
+    bastion = Server(name="bastion", host="b.example", username="ops", port=2222)
+    target = Server(name="target", host="t.example", username="u", jump_host="bastion")
+    chain = resolve_jump_chain(target, [bastion, target])
+    assert [s.name for s in chain] == ["bastion"]
+
+
+def test_resolve_jump_chain_multi_hop():
+    """Test multi-hop jump chain is walked in correct order."""
+    outer = Server(name="outer", host="o.example", username="ops")
+    inner = Server(name="inner", host="i.example", username="ops", jump_host="outer")
+    target = Server(name="target", host="t.example", username="u", jump_host="inner")
+    chain = resolve_jump_chain(target, [outer, inner, target])
+    assert [s.name for s in chain] == ["inner", "outer"]
+
+
+def test_resolve_jump_chain_cycle_raises():
+    """Test cycle in jump chain raises JumpResolutionError."""
+    a = Server(name="a", host="a.example", username="u", jump_host="b")
+    b = Server(name="b", host="b.example", username="u", jump_host="a")
+    with pytest.raises(JumpResolutionError, match="cycle"):
+        resolve_jump_chain(a, [a, b])
+
+
+def test_resolve_jump_chain_missing_jump_raises():
+    """Test unknown jump host name raises JumpResolutionError."""
+    target = Server(name="target", host="t.example", username="u", jump_host="ghost")
+    with pytest.raises(JumpResolutionError, match="not found"):
+        resolve_jump_chain(target, [target])
+
+
+def test_connect_builds_proxyjump_argument(monkeypatch):
+    """Test connect adds -J user@host:port when jump_host is set."""
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    bastion = Server(name="bastion", host="b.example", username="ops", port=2222)
+    target = Server(name="target", host="t.example", username="u", jump_host="bastion")
+
+    rc = connect(target, copy_password=False, all_servers=[bastion, target])
+
+    assert rc == 0
+    assert commands == [["ssh", "-p", "22", "-J", "ops@b.example:2222", "u@t.example"]]
+
+
+def test_connect_builds_multi_hop_proxyjump(monkeypatch):
+    """Test connect builds comma-separated -J for multi-hop chains."""
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    outer = Server(name="outer", host="o.example", username="x")
+    inner = Server(name="inner", host="i.example", username="y", jump_host="outer")
+    target = Server(name="target", host="t.example", username="z", jump_host="inner")
+
+    rc = connect(target, copy_password=False, all_servers=[outer, inner, target])
+
+    assert rc == 0
+    assert commands[0][3] == "-J"
+    assert commands[0][4] == "y@i.example:22,x@o.example:22"
+
+
+def test_connect_reports_jump_resolution_error(monkeypatch, capsys):
+    """Test connect returns 1 and prints an error when jump chain cannot be resolved."""
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    target = Server(name="target", host="t.example", username="u", jump_host="ghost")
+    rc = connect(target, copy_password=False, all_servers=[target])
+
+    assert rc == 1
+    assert commands == []

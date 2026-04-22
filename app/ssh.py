@@ -14,6 +14,37 @@ from .models import Server
 console = Console()
 
 
+class JumpResolutionError(Exception):
+    """Raised when a jump host chain cannot be resolved."""
+
+
+def resolve_jump_chain(server: Server, all_servers: list[Server]) -> list[Server]:
+    """Walk server.jump_host references and return the ordered chain.
+
+    Returns [first_hop, ..., last_hop] (excluding the target itself).
+    Raises JumpResolutionError on cycles or missing references.
+    """
+    if not server.jump_host:
+        return []
+    by_name = {s.name: s for s in all_servers}
+    chain: list[Server] = []
+    seen: set[str] = {server.name}
+    current_name = server.jump_host
+    while current_name:
+        if current_name in seen:
+            raise JumpResolutionError(f"Jump host cycle detected: {current_name} already in chain")
+        jump = by_name.get(current_name)
+        if jump is None:
+            raise JumpResolutionError(f"Jump host '{current_name}' not found in saved servers")
+        chain.append(jump)
+        seen.add(current_name)
+        current_name = jump.jump_host
+    # order: first hop (outermost) ... last hop (closest to target)
+    # as walked, chain[0] is the server's direct jump, chain[-1] is the last one before target.
+    # ssh -J expects the same order: -J user1@host1,user2@host2,...
+    return chain
+
+
 def has_ssh() -> bool:
     """Check if SSH client is available."""
     return shutil.which("ssh") is not None
@@ -40,8 +71,12 @@ def _clipboard_failure_message(error: Exception) -> str:
     return f"{base_message} Use [cyan]better-ssh show-pass[/cyan] if needed."
 
 
-def connect(server: Server, copy_password: bool = True) -> int:
-    """Connect to SSH server. Returns exit code."""
+def connect(server: Server, copy_password: bool = True, all_servers: list[Server] | None = None) -> int:
+    """Connect to SSH server. Returns exit code.
+
+    If server.jump_host is set, all_servers must be provided so the chain
+    can be resolved into a -J argument.
+    """
     if not has_ssh():
         console.print("[red]SSH client not found.[/red]")
         system = platform.system()
@@ -71,6 +106,17 @@ def connect(server: Server, copy_password: bool = True) -> int:
             console.print(_clipboard_failure_message(e))
 
     cmd = ["ssh", "-p", str(server.port)]
+
+    # ProxyJump chain
+    if server.jump_host:
+        try:
+            chain = resolve_jump_chain(server, all_servers or [])
+        except JumpResolutionError as exc:
+            console.print(f"[red]Jump host error: {exc}[/red]")
+            return 1
+        jump_spec = ",".join(f"{j.username}@{j.host}:{j.port}" for j in chain)
+        cmd += ["-J", jump_spec]
+
     if server.key_path:
         cmd += ["-i", server.key_path]
     if server.certificate_path:
