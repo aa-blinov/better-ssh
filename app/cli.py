@@ -62,6 +62,7 @@ def _print_servers(servers: list[Server]) -> None:
     """Print servers table."""
     show_via = any(s.jump_host for s in servers)
     show_keepalive = any(s.keep_alive_interval for s in servers)
+    show_tags = any(s.tags for s in servers)
     show_notes = any(s.notes for s in servers)
     table = Table(title="Servers")
     table.add_column("ID", style="dim", no_wrap=True)
@@ -73,6 +74,8 @@ def _print_servers(servers: list[Server]) -> None:
         table.add_column("Via", style="cyan", no_wrap=True)
     if show_keepalive:
         table.add_column("Alive", style="green", justify="right", no_wrap=True)
+    if show_tags:
+        table.add_column("Tags", style="magenta", max_width=30, overflow="fold")
     if show_notes:
         table.add_column("Notes", style="dim", max_width=40, overflow="ellipsis")
 
@@ -83,6 +86,8 @@ def _print_servers(servers: list[Server]) -> None:
             row.append(s.jump_host or "")
         if show_keepalive:
             row.append(f"{s.keep_alive_interval}s" if s.keep_alive_interval else "")
+        if show_tags:
+            row.append(", ".join(s.tags) if s.tags else "")
         if show_notes:
             row.append(s.notes or "")
         table.add_row(*row)
@@ -104,6 +109,22 @@ def _sort_servers(servers: list[Server]) -> list[Server]:
 # picker. Using None here (rather than a magic string) guarantees no
 # collision with any user-chosen server name, which must be a non-empty str.
 _NONE_JUMP_SENTINEL: object = object()
+
+
+def _parse_tags(raw: str) -> list[str]:
+    """Parse a comma-separated tag string into a deduplicated, trimmed list."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for token in raw.split(","):
+        t = token.strip()
+        if not t:
+            continue
+        key = t.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+    return out
 
 
 def _prompt_keep_alive_interval(default: int) -> int | None:
@@ -362,6 +383,7 @@ def add_server(
         help="Password (WARNING: visible in shell history; prefer interactive prompt)",
     ),
     note: str | None = typer.Option(None, "--notes", help="Free-form note attached to the server"),
+    tag: list[str] | None = typer.Option(None, "--tag", "-t", help="Tag (repeatable: -t prod -t db)"),
 ):
     """Add a new server."""
     try:
@@ -416,6 +438,13 @@ def add_server(
         elif typer.confirm("Add a note?", default=False):
             notes = typer.prompt("Note") or None
 
+        tags: list[str] = []
+        if tag is not None:
+            # Non-interactive: use flags, deduplicated/trimmed
+            tags = _parse_tags(",".join(tag))
+        elif typer.confirm("Add tags?", default=False):
+            tags = _parse_tags(typer.prompt("Comma-separated tags"))
+
         keep_alive_interval: int | None = None
         if keep_alive is not None:
             # Non-interactive: keep_alive > 0 enables; 0 keeps disabled (consistent with helper)
@@ -434,6 +463,7 @@ def add_server(
             jump_host=jump_host,
             notes=notes,
             keep_alive_interval=keep_alive_interval,
+            tags=tags,
         )
 
         error = _check_jump_cycle(existing_servers, server)
@@ -609,6 +639,15 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         elif typer.confirm("Enable SSH keep-alive?", default=False):
             keep_alive_interval = _prompt_keep_alive_interval(60)
 
+        tags = srv.tags
+        if srv.tags:
+            if typer.confirm(f"Change tags? [{', '.join(srv.tags)}]", default=False):
+                tags = _parse_tags(
+                    typer.prompt("New comma-separated tags (empty to clear)", default="", show_default=False)
+                )
+        elif typer.confirm("Add tags?", default=False):
+            tags = _parse_tags(typer.prompt("Comma-separated tags"))
+
         old_name = srv.name
         srv.name = name
         srv.host = host
@@ -620,6 +659,7 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         srv.jump_host = jump_host
         srv.notes = notes
         srv.keep_alive_interval = keep_alive_interval
+        srv.tags = tags
 
         # Validate the prospective jump chain before saving
         prospective = [s if s.id != srv.id else srv for s in all_servers]
