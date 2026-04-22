@@ -13,6 +13,16 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import storage
+from .domain import (
+    auth_label,
+    check_jump_cycle,
+    favorite_label,
+    jump_host_usage_map,
+    name_conflict,
+    parse_tags,
+    servers_matching_query,
+    sort_servers,
+)
 from .encryption import decrypt_password, encrypt_password, find_ssh_key, find_ssh_key_for_encryption, is_encrypted
 from .models import Server
 from .ssh import JumpResolutionError, check_server_availability, connect, resolve_jump_chain
@@ -79,9 +89,9 @@ def _print_servers(servers: list[Server]) -> None:
     if show_notes:
         table.add_column("Notes", style="dim", max_width=40, overflow="ellipsis")
 
-    for s in _sort_servers(servers):
-        auth = _auth_label(s)
-        row = [s.id[:8], _favorite_label(s), s.name, f"{s.username}@{s.host}:{s.port}", auth]
+    for s in sort_servers(servers):
+        auth = auth_label(s)
+        row = [s.id[:8], favorite_label(s), s.name, f"{s.username}@{s.host}:{s.port}", auth]
         if show_via:
             row.append(s.jump_host or "")
         if show_keepalive:
@@ -95,36 +105,10 @@ def _print_servers(servers: list[Server]) -> None:
     console.print(table)
 
 
-def _sort_servers(servers: list[Server]) -> list[Server]:
-    """Sort servers for daily use: pinned first, then recent, then frequent, then name."""
-
-    def sort_key(server: Server) -> tuple[int, float, int, str]:
-        last_used_ts = server.last_used_at.timestamp() if server.last_used_at else 0.0
-        return (-int(server.favorite), -last_used_ts, -server.use_count, server.name.lower())
-
-    return sorted(servers, key=sort_key)
-
-
 # Sentinel for the "(none — direct connection)" option in the jump-host
-# picker. Using None here (rather than a magic string) guarantees no
+# picker. Using a unique object (rather than a magic string) guarantees no
 # collision with any user-chosen server name, which must be a non-empty str.
 _NONE_JUMP_SENTINEL: object = object()
-
-
-def _parse_tags(raw: str) -> list[str]:
-    """Parse a comma-separated tag string into a deduplicated, trimmed list."""
-    seen: set[str] = set()
-    out: list[str] = []
-    for token in raw.split(","):
-        t = token.strip()
-        if not t:
-            continue
-        key = t.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(t)
-    return out
 
 
 def _prompt_keep_alive_interval(default: int) -> int | None:
@@ -139,54 +123,6 @@ def _prompt_keep_alive_interval(default: int) -> int | None:
         type=click.IntRange(min=0),
     )
     return value if value > 0 else None
-
-
-def _name_conflict(name: str, servers: list[Server], exclude_id: str | None = None) -> Server | None:
-    """Return an existing server whose name equals `name` (case-insensitive), if any."""
-    target = name.strip().lower()
-    if not target:
-        return None
-    for s in servers:
-        if s.id == exclude_id:
-            continue
-        if s.name.lower() == target:
-            return s
-    return None
-
-
-def _check_jump_cycle(servers: list[Server], server: Server) -> str | None:
-    """Walk the prospective jump chain for `server` over `servers`.
-
-    Returns a human-readable error message if a cycle or missing reference
-    would result, or None if the chain is valid.
-    """
-    if not server.jump_host:
-        return None
-    by_name = {s.name: s for s in servers if s.id != server.id}
-    by_name[server.name] = server  # consider the prospective state
-    seen = {server.name}
-    current = server.jump_host
-    chain = [server.name]
-    while current:
-        if current in seen:
-            chain.append(current)
-            return f"Jump host cycle detected: {' → '.join(chain)}"
-        jump = by_name.get(current)
-        if jump is None:
-            return f"Jump host '{current}' not found in saved servers"
-        seen.add(current)
-        chain.append(current)
-        current = jump.jump_host
-    return None
-
-
-def _jump_host_usage_map(all_servers: list[Server]) -> dict[str, int]:
-    """Return {name: count} of how many servers use each name as jump_host."""
-    counts: dict[str, int] = {}
-    for s in all_servers:
-        if s.jump_host:
-            counts[s.jump_host] = counts.get(s.jump_host, 0) + 1
-    return counts
 
 
 def _select_jump_host(
@@ -208,7 +144,7 @@ def _select_jump_host(
         console.print("Add one first with [cyan]bssh add[/cyan], then re-run this command.")
         return False, current
 
-    usage = _jump_host_usage_map(all_servers or [])
+    usage = jump_host_usage_map(all_servers or [])
 
     def label(s: Server) -> str:
         used_by = usage.get(s.name, 0)
@@ -219,7 +155,7 @@ def _select_jump_host(
         marker = " [current]" if current == s.name else ""
         return f"{s.display()}{marker}{suffix}"
 
-    sorted_candidates = _sort_servers(candidates)
+    sorted_candidates = sort_servers(candidates)
     choices: list[Choice] = []
     if include_none:
         choices.append(Choice(value=_NONE_JUMP_SENTINEL, name="(none — direct connection)"))
@@ -245,7 +181,7 @@ def _select_jump_host(
 
 def _select_server(servers: list[Server], message: str) -> Server:
     """Select a server from the interactive menu."""
-    sorted_servers = _sort_servers(servers)
+    sorted_servers = sort_servers(servers)
     by_id = {s.id: s for s in sorted_servers}
 
     try:
@@ -265,27 +201,6 @@ def _select_server(servers: list[Server], message: str) -> Server:
         console.print("[red]Failed to identify server[/red]")
         raise typer.Exit(1)
     return server
-
-
-def _servers_matching_query(servers: list[Server], query: str) -> list[Server]:
-    """Return servers that loosely match the provided query.
-
-    Matches against name, host, username, id prefix, tags, and jump_host
-    (all case-insensitive substrings except id which uses prefix). Matching
-    by jump_host surfaces both a bastion server and its dependents under one
-    search term.
-    """
-    normalized_query = query.lower()
-    return [
-        server
-        for server in servers
-        if normalized_query in server.name.lower()
-        or normalized_query in server.host.lower()
-        or normalized_query in server.username.lower()
-        or server.id.startswith(query)
-        or any(normalized_query in tag.lower() for tag in server.tags)
-        or (server.jump_host and normalized_query in server.jump_host.lower())
-    ]
 
 
 def _merge_servers_by_name(existing_servers: list[Server], imported_servers: list[Server]) -> list[Server]:
@@ -314,22 +229,6 @@ def _merge_servers_by_name(existing_servers: list[Server], imported_servers: lis
     return list(merged_by_id.values())
 
 
-def _auth_label(server: Server) -> str:
-    """Return a user-facing auth label for a server."""
-    if server.certificate_path:
-        return "cert"
-    if server.key_path:
-        return "key"
-    if server.password:
-        return "pwd"
-    return "auto"
-
-
-def _favorite_label(server: Server) -> str:
-    """Return a user-facing favorite label for a server."""
-    return "pin" if server.favorite else ""
-
-
 @app.callback()
 def root(ctx: typer.Context) -> None:
     """Open the connect flow when the CLI is run without a subcommand."""
@@ -350,7 +249,7 @@ def list_servers(
         return
 
     if query:
-        matching = _servers_matching_query(servers, query)
+        matching = servers_matching_query(servers, query)
         if not matching:
             console.print(f"[yellow]No servers match '{query}'.[/yellow]")
             return
@@ -391,7 +290,7 @@ def add_server(
 
         # Uniqueness check up front so we fail before prompting for credentials
         if name:
-            conflict = _name_conflict(name, existing_servers)
+            conflict = name_conflict(name, existing_servers)
             if conflict:
                 console.print(f"[red]A server named '{conflict.name}' already exists (id: {conflict.id[:8]}).[/red]")
                 console.print("Pick a different name or edit the existing one with [cyan]bssh edit[/cyan].")
@@ -441,9 +340,9 @@ def add_server(
         tags: list[str] = []
         if tag is not None:
             # Non-interactive: use flags, deduplicated/trimmed
-            tags = _parse_tags(",".join(tag))
+            tags = parse_tags(",".join(tag))
         elif typer.confirm("Add tags?", default=False):
-            tags = _parse_tags(typer.prompt("Comma-separated tags"))
+            tags = parse_tags(typer.prompt("Comma-separated tags"))
 
         keep_alive_interval: int | None = None
         if keep_alive is not None:
@@ -466,7 +365,7 @@ def add_server(
             tags=tags,
         )
 
-        error = _check_jump_cycle(existing_servers, server)
+        error = check_jump_cycle(existing_servers, server)
         if error:
             console.print(f"[red]{error}[/red]")
             raise typer.Exit(1)
@@ -492,7 +391,7 @@ def view(query: str | None = typer.Argument(None, help="ID/name/partial name (op
     else:
         srv = storage.find_server(query, all_servers)
         if not srv:
-            matching = _servers_matching_query(all_servers, query)
+            matching = servers_matching_query(all_servers, query)
             if matching:
                 srv = _select_server(matching, f"Select server to view for '{query}':")
             else:
@@ -670,7 +569,7 @@ def edit(
         else:
             name = typer.prompt("Name", default=srv.name)
         if name != srv.name:
-            conflict = _name_conflict(name, all_servers, exclude_id=srv.id)
+            conflict = name_conflict(name, all_servers, exclude_id=srv.id)
             if conflict:
                 console.print(f"[red]A server named '{conflict.name}' already exists (id: {conflict.id[:8]}).[/red]")
                 console.print("[dim]No changes saved.[/dim]")
@@ -781,16 +680,16 @@ def edit(
 
         # Tags
         if tag is not None:
-            tags = _parse_tags(",".join(tag))
+            tags = parse_tags(",".join(tag))
         else:
             tags = srv.tags
             if srv.tags:
                 if typer.confirm(f"Change tags? [{', '.join(srv.tags)}]", default=False):
-                    tags = _parse_tags(
+                    tags = parse_tags(
                         typer.prompt("New comma-separated tags (empty to clear)", default="", show_default=False)
                     )
             elif typer.confirm("Add tags?", default=False):
-                tags = _parse_tags(typer.prompt("Comma-separated tags"))
+                tags = parse_tags(typer.prompt("Comma-separated tags"))
 
         old_name = srv.name
         srv.name = name
@@ -812,7 +711,7 @@ def edit(
             for other in prospective:
                 if other.id != srv.id and other.jump_host == old_name:
                     other.jump_host = name
-        error = _check_jump_cycle(prospective, srv)
+        error = check_jump_cycle(prospective, srv)
         if error:
             console.print(f"[red]{error}[/red]")
             console.print("[dim]No changes saved.[/dim]")
@@ -907,7 +806,7 @@ def connect_cmd(
     else:
         srv = storage.find_server(query, servers)
         if not srv:
-            matching_servers = _servers_matching_query(servers, query)
+            matching_servers = servers_matching_query(servers, query)
             if matching_servers:
                 srv = _select_server(matching_servers, f"Select server to connect for '{query}':")
             else:
@@ -1373,7 +1272,7 @@ def import_servers(
     # Show what will be imported
     console.print(f"\n[bold]Found {len(imported_servers)} server(s) to import:[/bold]")
     for srv in imported_servers:
-        console.print(f"  - {srv.name} ({srv.username}@{srv.host}:{srv.port}) [{_auth_label(srv)}]")
+        console.print(f"  - {srv.name} ({srv.username}@{srv.host}:{srv.port}) [{auth_label(srv)}]")
 
     # Ask for import mode if there are existing servers
     existing_servers = storage.load_servers()
@@ -1453,7 +1352,7 @@ def import_ssh_config_cmd(
 
     console.print(f"\n[bold]Found {len(imported_servers)} SSH host(s) in:[/bold] {config_path}")
     for srv in imported_servers:
-        console.print(f"  - {srv.name} ({srv.username}@{srv.host}:{srv.port}) [{_auth_label(srv)}]")
+        console.print(f"  - {srv.name} ({srv.username}@{srv.host}:{srv.port}) [{auth_label(srv)}]")
 
     existing_servers = storage.load_servers()
     merge_mode = True

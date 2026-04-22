@@ -7,15 +7,24 @@ pins down the contract before these helpers are extracted into app.domain.
 
 from __future__ import annotations
 
-from app.cli import (
-    _check_jump_cycle,
-    _jump_host_usage_map,
-    _name_conflict,
-    _parse_tags,
-    _servers_matching_query,
-    _sort_servers,
+from app.domain import (
+    check_jump_cycle,
+    jump_host_usage_map,
+    name_conflict,
+    parse_tags,
+    servers_matching_query,
+    sort_servers,
 )
 from app.models import Server
+
+# Keep original underscore-prefixed aliases so existing test bodies stay readable
+# with their original call sites (these mirror the pre-refactor internal names).
+_check_jump_cycle = check_jump_cycle
+_jump_host_usage_map = jump_host_usage_map
+_name_conflict = name_conflict
+_parse_tags = parse_tags
+_servers_matching_query = servers_matching_query
+_sort_servers = sort_servers
 
 # ---------------------------------------------------------------------------
 # _parse_tags
