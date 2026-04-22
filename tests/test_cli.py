@@ -412,6 +412,134 @@ def test_edit_can_clear_existing_note(
     assert updated.notes is None
 
 
+def test_add_with_key_certificate_notes_flags_skip_prompts(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --key, --certificate, --notes set fields non-interactively and skip their confirms."""
+    confirms: list[str] = []
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: confirms.append(text) or False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "add",
+            "--name",
+            "Flaggy",
+            "--host",
+            "f.example",
+            "--port",
+            "22",
+            "--username",
+            "u",
+            "--key",
+            "/keys/id_ed25519",
+            "--certificate",
+            "/keys/id_ed25519-cert.pub",
+            "--notes",
+            "provisioned via script",
+        ],
+    )
+
+    assert result.exit_code == 0
+    # Flags must have short-circuited the confirms
+    assert "Add SSH key?" not in confirms
+    assert "Add a note?" not in confirms
+
+    added = next(s for s in load_servers() if s.name == "Flaggy")
+    assert added.key_path == "/keys/id_ed25519"
+    assert added.certificate_path == "/keys/id_ed25519-cert.pub"
+    assert added.notes == "provisioned via script"
+
+
+def test_add_with_password_flag_skips_prompt(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --password sets the password non-interactively and skips the confirm/prompt."""
+    confirms: list[str] = []
+    prompts: list[str] = []
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: prompts.append(text) or "")
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: confirms.append(text) or False,
+    )
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Pwd", "--host", "p.example", "--port", "22", "--username", "u", "--password", "s3cr3t"],
+    )
+
+    assert result.exit_code == 0
+    assert "Add password?" not in confirms
+    assert "Password" not in prompts
+    added = next(s for s in load_servers() if s.name == "Pwd")
+    assert added.password == "s3cr3t"
+
+
+def test_add_with_empty_flag_values_stores_none(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test empty flag values (--key '', --notes '') normalize to None rather than empty strings."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        [
+            "add",
+            "--name",
+            "Empty",
+            "--host",
+            "e.example",
+            "--port",
+            "22",
+            "--username",
+            "u",
+            "--key",
+            "",
+            "--notes",
+            "",
+        ],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "Empty")
+    assert added.key_path is None
+    assert added.notes is None
+
+
+def test_list_filters_by_jump_host_reference(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `ls <query>` also surfaces servers that use <query> as their jump host."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="Target", host="t.example", username="u", jump_host="Bastion"),
+            Server(id="o-1", name="Other", host="o.example", username="u"),
+        ]
+    )
+
+    result = runner.invoke(app, ["ls", "bastion"])
+
+    assert result.exit_code == 0
+    # Both the bastion itself and its dependent should appear
+    assert "Bastion" in result.stdout
+    assert "Target" in result.stdout
+    # Unrelated server is filtered out
+    assert "Other" not in result.stdout
+
+
 def test_add_with_keep_alive_flag_skips_prompt(
     runner: CliRunner,
     temp_config_dir: Path,
