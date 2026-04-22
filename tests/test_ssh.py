@@ -433,6 +433,35 @@ def test_connect_builds_multi_hop_proxyjump(monkeypatch):
     assert commands[0][4] == "y@i.example:22,x@o.example:22"
 
 
+def test_connect_adds_server_alive_options_when_keep_alive_set(monkeypatch):
+    """Test connect emits ServerAliveInterval/CountMax when keep_alive_interval is set."""
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(name="prod", host="prod.example", username="deploy", keep_alive_interval=45)
+    rc = connect(server, copy_password=False)
+
+    assert rc == 0
+    cmd = commands[0]
+    # -o ServerAliveInterval=45 and -o ServerAliveCountMax=3 must both appear
+    assert "-o" in cmd
+    assert "ServerAliveInterval=45" in cmd
+    assert "ServerAliveCountMax=3" in cmd
+
+
+def test_connect_omits_server_alive_options_when_keep_alive_unset(monkeypatch):
+    """Test connect does not emit ServerAliveInterval when the field is None."""
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(name="prod", host="prod.example", username="deploy")
+    connect(server, copy_password=False)
+
+    assert not any("ServerAliveInterval" in part for part in commands[0])
+
+
 def test_connect_reports_jump_resolution_error(monkeypatch, capsys):
     """Test connect returns 1 and prints an error when jump chain cannot be resolved."""
     commands: list[list[str]] = []
