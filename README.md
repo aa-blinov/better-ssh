@@ -15,7 +15,8 @@ A command-line tool for managing SSH connections with an interactive interface, 
 - [Usage](#usage)
   - [Filtering the Server List](#filtering-the-server-list)
   - [Adding Servers Non-Interactively](#adding-servers-non-interactively)
-  - [Server Notes and Keep-Alive](#server-notes-and-keep-alive)
+  - [Server Notes, Tags, and Keep-Alive](#server-notes-tags-and-keep-alive)
+  - [Viewing a Single Server](#viewing-a-single-server)
 - [Jump Hosts (ProxyJump)](#jump-hosts-proxyjump)
 - [Configuration](#configuration)
 - [Password Encryption](#password-encryption)
@@ -38,7 +39,8 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Support for SSH private key and certificate authentication
 - ProxyJump support — connect through a bastion host (or a chain of hosts)
 - Optional SSH keep-alive per server (ServerAliveInterval)
-- Free-form notes attached to each server
+- Free-form notes and tags attached to each server
+- Detailed per-server card view (`bssh view <name>`)
 - Server management (add, edit, remove, list)
 - `bssh ls <query>` filter by name, host, user, tag, id prefix, or jump host
 - Server availability checking (ping individual or health check all)
@@ -168,6 +170,7 @@ Commands:
   remove              Remove a server.                Alias: rm
   show-pass           Show password.                  Alias: sp
   unpin               Remove a server from pinned favorites.
+  view                Show a detailed card for a server. Alias: v
 ```
 
 Run `bssh` without a subcommand to open the interactive connect menu immediately.
@@ -228,19 +231,44 @@ Flag reference:
 | `--jump <name>` | `-J` | Saved server name to use as ProxyJump (case-insensitive) |
 | `--keep-alive <seconds>` | `-K` | `ServerAliveInterval` in seconds; `0` leaves it disabled |
 | `--notes <text>` | — | Free-form note attached to the server |
+| `--tag <value>` | `-t` | Tag (repeatable: `-t prod -t db`) |
 
 Passing an empty string (`--key ""`, `--notes ""`) stores `None` — useful when a script wants to be explicit about clearing a field.
 
 > **`--password` security note:** values passed on the command line end up in shell history (e.g. `~/.bash_history`), `/proc/<pid>/cmdline`, and process-listing tools. Prefer the interactive prompt when possible. The flag exists for provisioning scripts that source the password from a secure secret store at invocation time.
 
-### Server Notes and Keep-Alive
+The same flag set is also available on `bssh edit`, plus `--name`, `--host`, `--port`, and `--username` for in-place field updates. Only flags you pass are applied — everything else still goes through the interactive prompts, so mixing is fine:
 
-Two optional per-server fields surface in the table when set:
+```bash
+# Fully non-interactive
+bssh edit prod --keep-alive 60 --notes "updated" -t prod -t eu
 
-- **Notes** — free-form text attached to a server (shown as the `Notes` column, truncated at 40 chars). Edit with `bssh edit` or set at creation time with `--notes`.
-- **Keep-Alive** — a `ServerAliveInterval` value in seconds. When set, `bssh connect` passes `-o ServerAliveInterval=<N> -o ServerAliveCountMax=3` to OpenSSH, preventing NAT/idle disconnects. Shown as the `Alive` column (e.g. `60s`). Enter `0` at the prompt (or `--keep-alive 0`) to leave it disabled.
+# Update one field, then interactively review the rest
+bssh edit prod --host 10.0.0.9
+```
 
-Both columns are auto-hidden when no server has a value set.
+Empty-string clearing works here too: `--jump ""` drops the ProxyJump, `--notes ""` wipes the note, etc.
+
+### Server Notes, Tags, and Keep-Alive
+
+Three optional per-server fields surface as columns in the `ls` table when at least one server has them set:
+
+- **Notes** — free-form text attached to a server (`Notes` column, truncated at 40 chars). Edit with `bssh edit` or set at creation time with `--notes`.
+- **Tags** — small labels (e.g. `prod`, `db`, `eu-west`) used to organize and filter the list (`Tags` column). Tags are comma-separated in the interactive prompt or passed repeatedly as `-t prod -t db`. `bssh ls <query>` matches on tags, so `bssh ls prod` pulls every server labeled that way.
+- **Keep-Alive** — a `ServerAliveInterval` value in seconds. When set, `bssh connect` passes `-o ServerAliveInterval=<N> -o ServerAliveCountMax=3` to OpenSSH, preventing NAT/idle disconnects (`Alive` column, e.g. `60s`). Enter `0` at the prompt (or `--keep-alive 0`) to leave it disabled.
+
+All three columns are auto-hidden when no server has a value set.
+
+### Viewing a Single Server
+
+`bssh view <name>` (alias `v`) renders a full-fidelity card for one server in a Rich panel. Unlike `ls`, nothing gets truncated — useful when you want to see the complete notes, the resolved jump chain (`user@bastion:port → target-name`), and the list of other servers that reference this one as a jump host.
+
+```bash
+bssh view prod
+bssh v prod-db
+```
+
+The view also flags a broken jump-host reference in red instead of failing silently, so you can spot stale ProxyJump targets before a connection attempt.
 
 ### Importing From SSH Config
 
