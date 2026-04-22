@@ -32,20 +32,23 @@ def _build_scp_command(
     *,
     recursive: bool,
     compress: bool,
+    preserve: bool,
     all_servers: list[Server],
 ) -> list[str]:
     """Build the `scp` argv for a given server profile and source/dest pair.
 
     Mirrors the auth/jump/keep-alive pieces of ssh.connect; flags unique to
-    scp (`-P` for port, `-r` for recursion, `-C` for compression) are added
-    here. Forwards and X11 are intentionally omitted — they don't apply to a
-    single file transfer.
+    scp (`-P` for port, `-r` for recursion, `-C` for compression, `-p` for
+    preserving mtime/atime/mode) are added here. Forwards and X11 are
+    intentionally omitted — they don't apply to a single file transfer.
     """
     cmd: list[str] = ["scp", "-P", str(server.port)]
     if recursive:
         cmd.append("-r")
     if compress:
         cmd.append("-C")
+    if preserve:
+        cmd.append("-p")
     if server.keep_alive_interval and server.keep_alive_interval > 0:
         cmd += ["-o", f"ServerAliveInterval={server.keep_alive_interval}", "-o", "ServerAliveCountMax=3"]
     if server.jump_host:
@@ -86,6 +89,12 @@ def put_cmd(
     remote: str = typer.Argument(..., help="Remote destination path"),
     recursive: bool = typer.Option(False, "--recursive", "-r", help="Copy directories recursively"),
     compress: bool = typer.Option(False, "--compress", "-C", help="Enable scp compression"),
+    preserve: bool = typer.Option(
+        False,
+        "--preserve",
+        "-p",
+        help="Preserve modification times, access times, and modes (scp -p)",
+    ),
 ):
     """Upload via `scp` using the server's stored profile."""
     if not has_scp():
@@ -107,6 +116,7 @@ def put_cmd(
             remote_spec,
             recursive=recursive,
             compress=compress,
+            preserve=preserve,
             all_servers=servers,
         )
     except JumpResolutionError as exc:
@@ -123,6 +133,12 @@ def get_cmd(
     local: str = typer.Argument(..., help="Local destination path"),
     recursive: bool = typer.Option(False, "--recursive", "-r", help="Copy directories recursively"),
     compress: bool = typer.Option(False, "--compress", "-C", help="Enable scp compression"),
+    preserve: bool = typer.Option(
+        False,
+        "--preserve",
+        "-p",
+        help="Preserve modification times, access times, and modes (scp -p)",
+    ),
 ):
     """Download via `scp` using the server's stored profile."""
     if not has_scp():
@@ -144,6 +160,7 @@ def get_cmd(
             local,
             recursive=recursive,
             compress=compress,
+            preserve=preserve,
             all_servers=servers,
         )
     except JumpResolutionError as exc:

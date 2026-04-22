@@ -317,10 +317,12 @@ Editing an existing server's forwards:
 # Upload
 bssh put prod-db ./backup.sql /var/backups/backup.sql
 bssh put prod-db ./releases -r -C              # directory with compression
+bssh put prod-db ./archive.tar.gz /var/backups/ -p   # keep mtime/atime/mode
 
 # Download
 bssh get prod-db /var/log/app.log ./app.log
 bssh get prod-db /etc/nginx -r ./nginx-snapshot
+bssh get prod-db /var/snapshots/data.bin ./data.bin -p   # preserve timestamps
 ```
 
 Flag reference:
@@ -329,6 +331,7 @@ Flag reference:
 | --- | --- | --- |
 | `--recursive` | `-r` | Recurse into directories (scp `-r`) |
 | `--compress` | `-C` | Enable scp compression |
+| `--preserve` | `-p` | Preserve modification times, access times, and modes (scp `-p`) |
 
 Notes:
 
