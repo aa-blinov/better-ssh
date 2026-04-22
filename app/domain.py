@@ -8,7 +8,36 @@ touching stdin/stdout or the filesystem.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from .models import Forward, Server
+
+
+def format_relative_time(when: datetime, now: datetime | None = None) -> str:
+    """Format a timestamp as a short human-friendly relative string.
+
+    - <60s     -> "just now"
+    - <60m     -> "Nm ago"
+    - <24h     -> "Nh ago"
+    - <30d     -> "Nd ago"
+    - older    -> ISO date "YYYY-MM-DD"
+
+    ``now`` is injectable so tests can pin a reference time deterministically.
+    """
+    reference = now or datetime.now(UTC)
+    # Ensure both timestamps have timezone info so subtraction doesn't raise.
+    when_tz = when if when.tzinfo else when.replace(tzinfo=UTC)
+    ref_tz = reference if reference.tzinfo else reference.replace(tzinfo=UTC)
+    seconds = (ref_tz - when_tz).total_seconds()
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m ago"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h ago"
+    if seconds < 86400 * 30:
+        return f"{int(seconds // 86400)}d ago"
+    return when_tz.date().isoformat()
 
 
 def parse_forward_spec(spec: str, kind: str) -> Forward:

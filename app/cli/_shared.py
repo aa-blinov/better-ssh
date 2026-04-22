@@ -16,7 +16,14 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from ..domain import auth_label, favorite_label, jump_host_usage_map, parse_forward_spec, sort_servers
+from ..domain import (
+    auth_label,
+    favorite_label,
+    format_relative_time,
+    jump_host_usage_map,
+    parse_forward_spec,
+    sort_servers,
+)
 from ..models import Forward, Server
 
 
@@ -76,6 +83,7 @@ def _print_servers(
     show_via = any(s.jump_host for s in servers)
     show_keepalive = any(s.keep_alive_interval for s in servers)
     show_forwards = any(s.forwards for s in servers)
+    show_last_used = any(s.last_used_at for s in servers)
     show_tags = any(s.tags for s in servers)
     show_notes = any(s.notes for s in servers)
     table = Table(title=title)
@@ -90,6 +98,8 @@ def _print_servers(
         table.add_column("Alive", style="green", justify="right", no_wrap=True)
     if show_forwards:
         table.add_column("Fwd", style="blue", justify="right", no_wrap=True)
+    if show_last_used:
+        table.add_column("Last used", style="dim", no_wrap=True)
     if show_tags:
         table.add_column("Tags", style="magenta", max_width=30, overflow="fold")
     if show_notes:
@@ -114,6 +124,8 @@ def _print_servers(
             row.append(f"{s.keep_alive_interval}s" if s.keep_alive_interval else "")
         if show_forwards:
             row.append(str(len(s.forwards)) if s.forwards else "")
+        if show_last_used:
+            row.append(format_relative_time(s.last_used_at) if s.last_used_at else "")
         if show_tags:
             row.append(escape(", ".join(s.tags)) if s.tags else "")
         if show_notes:

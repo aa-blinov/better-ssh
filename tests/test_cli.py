@@ -1559,6 +1559,8 @@ def test_recent_command_sorts_by_last_used_newest_first(
     assert "Pinned" not in stdout
     # Newer server appears before older one in the rendered output
     assert stdout.index("New") < stdout.index("Old")
+    # Column with relative timestamps must be shown
+    assert "Last used" in stdout
 
 
 def test_recent_command_respects_limit(
