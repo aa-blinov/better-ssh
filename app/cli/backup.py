@@ -100,9 +100,9 @@ def export_servers(
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(export_data, ensure_ascii=False, indent=2), encoding="utf-8")
-        console.print(f"[green]Exported {len(servers)} server(s) to:[/green] {output_path.absolute()}")
+        console.print(f"[green]Exported {len(servers)} server(s) to:[/green] {escape(str(output_path.absolute()))}")
     except Exception as e:
-        console.print(f"[red]Export failed: {e}[/red]")
+        console.print(f"[red]Export failed:[/red] {escape(str(e))}")
         raise typer.Exit(1)
 
 
@@ -115,13 +115,13 @@ def import_servers(
     input_path = Path(input_file)
 
     if not input_path.exists():
-        console.print(f"[red]File not found:[/red] {input_path}")
+        console.print(f"[red]File not found:[/red] {escape(str(input_path))}")
         raise typer.Exit(1)
 
     try:
         import_data = json.loads(input_path.read_text(encoding="utf-8"))
     except Exception as e:
-        console.print(f"[red]Failed to read file: {e}[/red]")
+        console.print(f"[red]Failed to read file:[/red] {escape(str(e))}")
         raise typer.Exit(1)
 
     if "servers" not in import_data:
@@ -131,7 +131,7 @@ def import_servers(
     try:
         imported_servers = [Server.model_validate(srv_data) for srv_data in import_data["servers"]]
     except Exception as e:
-        console.print(f"[red]Invalid server data: {e}[/red]")
+        console.print(f"[red]Invalid server data:[/red] {escape(str(e))}")
         raise typer.Exit(1)
 
     if not imported_servers:
@@ -202,20 +202,20 @@ def import_ssh_config_cmd(
     config_path = Path(config_file).expanduser() if config_file else get_default_ssh_config_path()
 
     if not config_path.exists():
-        console.print(f"[red]SSH config not found:[/red] {config_path}")
+        console.print(f"[red]SSH config not found:[/red] {escape(str(config_path))}")
         raise typer.Exit(1)
 
     try:
         imported_servers = import_ssh_config(config_path)
     except RuntimeError as e:
-        console.print(f"[red]SSH config import failed:[/red] {e}")
+        console.print(f"[red]SSH config import failed:[/red] {escape(str(e))}")
         raise typer.Exit(1)
 
     if not imported_servers:
         console.print("[yellow]No importable hosts found in SSH config.[/yellow]")
         raise typer.Exit(1)
 
-    console.print(f"\n[bold]Found {len(imported_servers)} SSH host(s) in:[/bold] {config_path}")
+    console.print(f"\n[bold]Found {len(imported_servers)} SSH host(s) in:[/bold] {escape(str(config_path))}")
     for srv in imported_servers:
         console.print(
             f"  - {escape(srv.name)} ({escape(srv.username)}@{escape(srv.host)}:{srv.port}) [{auth_label(srv)}]"

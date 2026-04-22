@@ -117,4 +117,7 @@ def show_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
             console.print("Re-enable and then properly disable: [cyan]bssh enc[/cyan] -> [cyan]bssh dec[/cyan]")
         raise typer.Exit(1)
 
-    console.print(f"[bold]{srv.password}[/bold]")
+    # Escape the password so brackets in it (e.g. "P[ass]w0rd") don't get
+    # parsed as Rich markup and render incorrectly — users need the exact
+    # literal value.
+    console.print(f"[bold]{escape(srv.password)}[/bold]")
