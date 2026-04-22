@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from rich.markup import escape
 from rich.panel import Panel
 
 from .. import storage
@@ -76,7 +77,7 @@ def enable_encryption():
     if stuck:
         console.print(f"\n[yellow]Warning: {len(stuck)} server(s) had unrecoverable passwords:[/yellow]")
         for name in stuck:
-            console.print(f"  [dim]• {name}[/dim]")
+            console.print(f"  [dim]• {escape(name)}[/dim]")
         console.print("[yellow]These passwords have been cleared. Re-enter with [cyan]bssh edit <name>[/cyan][/yellow]")
 
     settings = storage.load_settings()
@@ -134,7 +135,7 @@ to anyone with access to your computer.
     if stuck:
         console.print(f"\n[yellow]Warning: {len(stuck)} server(s) had unrecoverable passwords:[/yellow]")
         for name in stuck:
-            console.print(f"  [dim]• {name}[/dim]")
+            console.print(f"  [dim]• {escape(name)}[/dim]")
         console.print("[yellow]These passwords have been cleared. Re-enter with [cyan]bssh edit <name>[/cyan][/yellow]")
 
     settings = storage.load_settings()
@@ -162,7 +163,7 @@ def encryption_status():
         status = f"""
 [bold green]Encryption enabled[/bold green]
 
-SSH key: [cyan]{ssh_key}[/cyan]
+SSH key: [cyan]{escape(str(ssh_key))}[/cyan]
 Key status: {key_status}
 
 Passwords are automatically encrypted on save and decrypted on read.
@@ -178,7 +179,7 @@ Passwords are stored in [bold red]plaintext[/bold red] in servers.json file.
 To enable encryption use: [cyan]better-ssh encrypt[/cyan]
 """
         if available_key:
-            status += f"\nAvailable SSH key: [cyan]{available_key}[/cyan]"
+            status += f"\nAvailable SSH key: [cyan]{escape(str(available_key))}[/cyan]"
         else:
             status += "\n[yellow]SSH key not found. Create one: ssh-keygen -t ed25519[/yellow]"
 

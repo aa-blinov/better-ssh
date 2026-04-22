@@ -225,7 +225,7 @@ def _parse_forward_flags(
             try:
                 result.append(parse_forward_spec(spec, kind))
             except ValueError as exc:
-                console.print(f"[red]{exc}[/red]")
+                console.print(f"[red]{escape(str(exc))}[/red]")
                 raise typer.Exit(1)
     return result
 
@@ -259,7 +259,7 @@ def _prompt_forwards_interactively() -> list[Forward]:
         try:
             forwards.append(parse_forward_spec(spec, kind))
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
+            console.print(f"[red]{escape(str(exc))}[/red]")
     return forwards
 
 

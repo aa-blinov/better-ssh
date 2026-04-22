@@ -1214,6 +1214,24 @@ def test_list_hides_fwd_column_when_no_forwards(
     assert "Fwd" not in result.stdout
 
 
+def test_show_pass_renders_bracketed_password_literally(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh show-pass` prints the exact password even when it contains brackets.
+
+    Without escape, a password like "P[ass]w0rd" would be parsed as a Rich
+    style tag and render incorrectly — a silent data-integrity bug since the
+    user relies on show-pass to reveal the actual stored value.
+    """
+    save_servers([Server(id="p-1", name="P", host="h.example", username="u", password="P[ass]w0rd")])
+
+    result = runner.invoke(app, ["show-pass", "P"])
+
+    assert result.exit_code == 0
+    assert "P[ass]w0rd" in result.stdout
+
+
 def test_view_renders_server_with_bracketed_name_without_crashing(
     runner: CliRunner,
     temp_config_dir: Path,
