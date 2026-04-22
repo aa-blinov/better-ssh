@@ -518,6 +518,95 @@ def test_add_with_empty_flag_values_stores_none(
     assert added.notes is None
 
 
+def test_view_shows_all_fields_for_server(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh view <name>` renders all non-empty fields for one server."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops", port=2222),
+            Server(
+                id="t-1",
+                name="Target",
+                host="t.example",
+                username="deploy",
+                port=22,
+                key_path="/keys/id_ed25519",
+                jump_host="Bastion",
+                keep_alive_interval=60,
+                tags=["prod", "db"],
+                notes="main postgres node",
+                favorite=True,
+                use_count=5,
+            ),
+        ]
+    )
+
+    result = runner.invoke(app, ["view", "Target"])
+
+    assert result.exit_code == 0
+    stdout = result.stdout
+    assert "Target" in stdout
+    assert "/keys/id_ed25519" in stdout
+    # Jump chain references the bastion
+    assert "Bastion" in stdout or "b.example" in stdout
+    assert "60s" in stdout
+    assert "prod" in stdout
+    assert "db" in stdout
+    assert "main postgres node" in stdout
+
+
+def test_view_reports_broken_jump_chain(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test view highlights a broken jump_host reference rather than raising."""
+    save_servers(
+        [
+            Server(id="t-1", name="Target", host="t.example", username="u", jump_host="Ghost"),
+        ]
+    )
+
+    result = runner.invoke(app, ["view", "Target"])
+
+    assert result.exit_code == 0
+    assert "broken" in result.stdout
+    assert "Ghost" in result.stdout
+
+
+def test_view_lists_dependents_when_used_as_jump(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test view shows which servers reference this one as a jump host."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="T1", host="t1.example", username="u", jump_host="Bastion"),
+            Server(id="t-2", name="T2", host="t2.example", username="u", jump_host="Bastion"),
+        ]
+    )
+
+    result = runner.invoke(app, ["view", "Bastion"])
+
+    assert result.exit_code == 0
+    assert "2 servers use" in result.stdout
+
+
+def test_view_alias_v_works(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test the `v` alias resolves to the same view command."""
+    save_servers([Server(id="s-1", name="One", host="h.example", username="u")])
+
+    result = runner.invoke(app, ["v", "One"])
+
+    assert result.exit_code == 0
+    assert "One" in result.stdout
+
+
 def test_edit_with_flags_applies_them_without_prompts(
     runner: CliRunner,
     temp_config_dir: Path,
