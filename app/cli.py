@@ -66,10 +66,12 @@ def _print_servers(servers: list[Server]) -> None:
     table.add_column("Name", style="bold")
     table.add_column("Connection")
     table.add_column("Auth", justify="center", no_wrap=True)
+    table.add_column("Via", style="cyan", no_wrap=True)
 
     for s in _sort_servers(servers):
         auth = _auth_label(s)
-        table.add_row(s.id[:8], _favorite_label(s), s.name, f"{s.username}@{s.host}:{s.port}", auth)
+        via = s.jump_host or ""
+        table.add_row(s.id[:8], _favorite_label(s), s.name, f"{s.username}@{s.host}:{s.port}", auth, via)
 
     console.print(table)
 
@@ -82,6 +84,30 @@ def _sort_servers(servers: list[Server]) -> list[Server]:
         return (-int(server.favorite), -last_used_ts, -server.use_count, server.name.lower())
 
     return sorted(servers, key=sort_key)
+
+
+def _select_jump_host(candidates: list[Server], message: str) -> str | None:
+    """Interactively pick a jump host from candidate servers by name.
+
+    Returns the chosen server's name, or None if the user cancels or no
+    candidates are available.
+    """
+    if not candidates:
+        console.print("[yellow]No other servers to use as jump host. Add one first.[/yellow]")
+        return None
+    sorted_candidates = _sort_servers(candidates)
+    try:
+        name = inquirer.select(
+            message=message,
+            choices=[Choice(value=s.name, name=s.display()) for s in sorted_candidates],
+            cycle=True,
+            vi_mode=False,
+            instruction="Use arrows to navigate, search by name",
+        ).execute()
+    except KeyboardInterrupt:
+        console.print("\n[dim]Cancelled jump host selection.[/dim]")
+        return None
+    return name
 
 
 def _select_server(servers: list[Server], message: str) -> Server:
@@ -204,6 +230,11 @@ def add_server(
         if typer.confirm("Add password?", default=False):
             password = typer.prompt("Password", hide_input=True, confirmation_prompt=True) or None
 
+        jump_host: str | None = None
+        if typer.confirm("Use a jump host (ProxyJump)?", default=False):
+            existing = [s for s in storage.load_servers() if s.name != name]
+            jump_host = _select_jump_host(existing, "Select jump host:")
+
         server = Server(
             name=name,
             host=host,
@@ -211,6 +242,7 @@ def add_server(
             username=username,
             password=password,
             key_path=key_path,
+            jump_host=jump_host,
         )
         storage.upsert_server(server)
         console.print(f"[green]Added:[/green] {server.display()}  (id: {server.id})")
@@ -304,6 +336,18 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         elif typer.confirm("Add password?", default=False):
             password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
 
+        jump_host = srv.jump_host
+        if srv.jump_host:
+            if typer.confirm(f"Change jump host? [{srv.jump_host}]", default=False):
+                if typer.confirm("Clear jump host (use direct connection)?", default=False):
+                    jump_host = None
+                else:
+                    candidates = [s for s in storage.load_servers() if s.name != srv.name]
+                    jump_host = _select_jump_host(candidates, "Select jump host:") or srv.jump_host
+        elif typer.confirm("Use a jump host (ProxyJump)?", default=False):
+            candidates = [s for s in storage.load_servers() if s.name != srv.name]
+            jump_host = _select_jump_host(candidates, "Select jump host:")
+
         srv.name = name
         srv.host = host
         srv.port = port
@@ -311,6 +355,7 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         srv.key_path = key_path or None
         srv.certificate_path = certificate_path or None
         srv.password = password
+        srv.jump_host = jump_host
         storage.upsert_server(srv)
         console.print("[green]Saved.[/green]")
     except (KeyboardInterrupt, typer.Abort):
@@ -393,7 +438,7 @@ def connect_cmd(
             else:
                 srv = _select_server(servers, f"No direct match for '{query}'. Select server to connect:")
 
-    rc = connect(srv, copy_password=not no_copy)
+    rc = connect(srv, copy_password=not no_copy, all_servers=servers)
     if rc in (0, 130):
         storage.record_server_use(srv.id)
     raise typer.Exit(rc)

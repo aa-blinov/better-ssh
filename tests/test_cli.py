@@ -113,7 +113,7 @@ def test_query_shortcut_connects_unique_match(cli_with_servers: CliRunner, monke
     def fail_select(**kwargs):
         raise AssertionError("Interactive selection should not be used for a unique match")
 
-    def fake_connect(server, copy_password: bool = True):
+    def fake_connect(server, copy_password: bool = True, all_servers=None):
         selected["server"] = server
         selected["copy_password"] = copy_password
         return 17
@@ -144,7 +144,7 @@ def test_query_shortcut_ambiguous_match_opens_filtered_menu(
         assert len(kwargs["choices"]) == 3
         return FakePrompt()
 
-    def fake_connect(server, copy_password: bool = True):
+    def fake_connect(server, copy_password: bool = True, all_servers=None):
         selected["server"] = server
         return 19
 
@@ -170,7 +170,7 @@ def test_query_shortcut_no_match_opens_full_menu(cli_with_servers: CliRunner, mo
         assert len(kwargs["choices"]) == 3
         return FakePrompt()
 
-    def fake_connect(server, copy_password: bool = True):
+    def fake_connect(server, copy_password: bool = True, all_servers=None):
         selected["server"] = server
         return 29
 
@@ -337,6 +337,62 @@ def test_add_command_declines_key_and_password(
     assert added[0].key_path is None
 
 
+def test_add_command_confirms_jump_host_saves_selected_name(
+    runner: CliRunner,
+    servers_json_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test add: confirming jump host triggers inquirer select and saves the name."""
+
+    class FakeJumpPrompt:
+        def execute(self) -> str:
+            return "TestServer2"
+
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: text == "Use a jump host (ProxyJump)?",
+    )
+    monkeypatch.setattr("app.cli.inquirer.select", lambda **kw: FakeJumpPrompt())
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "ViaBastion", "--host", "10.0.0.50", "--port", "22", "--username", "app"],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "ViaBastion")
+    assert added.jump_host == "TestServer2"
+
+
+def test_add_command_declines_jump_host_leaves_unset(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test add: declining jump host does not set jump_host."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+    select_called = False
+
+    def fake_select(**kw):
+        nonlocal select_called
+        select_called = True
+        raise AssertionError("inquirer.select should not be called")
+
+    monkeypatch.setattr("app.cli.inquirer.select", fake_select)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Direct", "--host", "1.1.1.1", "--port", "22", "--username", "u"],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "Direct")
+    assert added.jump_host is None
+    assert select_called is False
+
+
 def test_add_command_confirms_password_prompts_with_confirmation(
     runner: CliRunner,
     temp_config_dir: Path,
@@ -416,7 +472,12 @@ def test_edit_no_key_shows_confirm_not_path_prompt(
     result = cli_with_servers.invoke(app, ["edit", "TestServer3"])
 
     assert result.exit_code == 0
-    assert confirm_calls == ["Add key path?", "Add certificate path?", "Add password?"]
+    assert confirm_calls == [
+        "Add key path?",
+        "Add certificate path?",
+        "Add password?",
+        "Use a jump host (ProxyJump)?",
+    ]
     # No key/cert path prompts — user declined via confirm
     assert not any("path" in p.lower() for p in prompt_calls)
 
@@ -447,7 +508,12 @@ def test_edit_existing_password_does_not_ask_clear_password(
     result = cli_with_servers.invoke(app, ["edit", "TestServer1"])
 
     assert result.exit_code == 0
-    assert confirm_calls == ["Add key path?", "Add certificate path?", "Change password?"]
+    assert confirm_calls == [
+        "Add key path?",
+        "Add certificate path?",
+        "Change password?",
+        "Use a jump host (ProxyJump)?",
+    ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-001")
     assert updated.password == "new-secret"
@@ -474,10 +540,90 @@ def test_edit_existing_key_path_can_be_cleared(
     result = cli_with_servers.invoke(app, ["edit", "TestServer2"])
 
     assert result.exit_code == 0
-    assert confirm_calls == ["Change key path? [/home/user/.ssh/id_rsa]", "Add certificate path?", "Add password?"]
+    assert confirm_calls == [
+        "Change key path? [/home/user/.ssh/id_rsa]",
+        "Add certificate path?",
+        "Add password?",
+        "Use a jump host (ProxyJump)?",
+    ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-002")
     assert updated.key_path is None
+
+
+def test_edit_without_jump_host_offers_to_add_one(
+    cli_with_servers: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit: a server without jump_host can have one assigned via ProxyJump prompt."""
+    prompt_values = iter(["TestServer1", "192.168.1.10", 22, "admin"])
+    confirm_calls: list[str] = []
+
+    class FakeJumpPrompt:
+        def execute(self) -> str:
+            return "TestServer2"
+
+    def fake_confirm(text: str, *args, **kwargs):
+        confirm_calls.append(text)
+        return text == "Use a jump host (ProxyJump)?"
+
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.confirm", fake_confirm)
+    monkeypatch.setattr("app.cli.inquirer.select", lambda **kw: FakeJumpPrompt())
+
+    result = cli_with_servers.invoke(app, ["edit", "TestServer1"])
+
+    assert result.exit_code == 0
+    assert "Use a jump host (ProxyJump)?" in confirm_calls
+
+    updated = next(s for s in load_servers() if s.id == "test-id-001")
+    assert updated.jump_host == "TestServer2"
+
+
+def test_edit_existing_jump_host_can_be_cleared(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit: a server with jump_host can clear it back to direct connection."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="Target", host="t.example", username="u", jump_host="Bastion"),
+        ]
+    )
+
+    prompt_values = iter(["Target", "t.example", 22, "u"])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: text.startswith(("Change jump host?", "Clear jump host")),
+    )
+
+    result = runner.invoke(app, ["edit", "Target"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "t-1")
+    assert updated.jump_host is None
+
+
+def test_list_shows_via_column_for_jump_host(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test ls output includes the 'Via' column populated for servers with jump_host."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="Target", host="t.example", username="u", jump_host="Bastion"),
+        ]
+    )
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    assert "Via" in result.stdout
+    assert "Bastion" in result.stdout
 
 
 def test_pin_command_marks_server_as_favorite(cli_with_servers: CliRunner):
@@ -531,7 +677,7 @@ def test_root_invocation_interactively_connects_selected_server(
         assert kwargs["message"] == "Select server to connect:"
         return FakePrompt()
 
-    def fake_connect(server, copy_password: bool = True):
+    def fake_connect(server, copy_password: bool = True, all_servers=None):
         selected["server"] = server
         selected["copy_password"] = copy_password
         return 0
@@ -606,7 +752,7 @@ def test_root_invocation_sorts_pinned_servers_before_recents(
         return FakePrompt()
 
     monkeypatch.setattr("app.cli.inquirer.select", fake_select)
-    monkeypatch.setattr("app.cli.connect", lambda server, copy_password=True: 0)
+    monkeypatch.setattr("app.cli.connect", lambda server, copy_password=True, all_servers=None: 0)
 
     result = runner.invoke(app, [])
 
@@ -753,14 +899,14 @@ def test_connect_records_use_only_on_success(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Test connect records server usage on rc=0 and rc=130, but not on other exit codes."""
-    monkeypatch.setattr("app.cli.connect", lambda srv, copy_password=True: 1)
+    monkeypatch.setattr("app.cli.connect", lambda srv, copy_password=True, all_servers=None: 1)
 
     cli_with_servers.invoke(app, ["connect", "TestServer1"])
 
     updated = next(s for s in load_servers() if s.id == "test-id-001")
     assert updated.use_count == 0  # not recorded for rc=1
 
-    monkeypatch.setattr("app.cli.connect", lambda srv, copy_password=True: 130)
+    monkeypatch.setattr("app.cli.connect", lambda srv, copy_password=True, all_servers=None: 130)
     cli_with_servers.invoke(app, ["connect", "TestServer1"])
 
     updated = next(s for s in load_servers() if s.id == "test-id-001")

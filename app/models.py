@@ -22,6 +22,7 @@ class Server(BaseModel):
     last_used_at: datetime | None = None
     tags: list[str] = Field(default_factory=list)
     notes: str | None = None
+    jump_host: str | None = None  # name of another saved server to use as ProxyJump
 
     def display(self) -> str:
         """Return formatted server display string."""
@@ -34,4 +35,5 @@ class Server(BaseModel):
         else:
             auth = "auto"
         prefix = "[pin] " if self.favorite else ""
-        return f"{prefix}{self.name}  [{self.username}@{self.host}:{self.port} | {auth}]"
+        via = f" via {self.jump_host}" if self.jump_host else ""
+        return f"{prefix}{self.name}  [{self.username}@{self.host}:{self.port} | {auth}]{via}"

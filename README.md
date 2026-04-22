@@ -32,6 +32,7 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Password storage with optional SSH key-based encryption
 - Automatic password clipboard integration
 - Support for SSH private key and certificate authentication
+- ProxyJump support — connect through a bastion host (or a chain of hosts)
 - Server management (add, edit, remove, list)
 - Server availability checking (ping individual or health check all)
 - Configuration backup and restore (export/import)
