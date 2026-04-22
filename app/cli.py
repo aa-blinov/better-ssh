@@ -98,6 +98,20 @@ def _sort_servers(servers: list[Server]) -> list[Server]:
 _NONE_JUMP_SENTINEL = "__none__"
 
 
+def _prompt_keep_alive_interval(default: int) -> int | None:
+    """Prompt for a keep-alive interval; return None when the user enters 0.
+
+    Uses click.IntRange(min=0) so negatives are rejected at the prompt layer
+    and both add/edit share one normalization point.
+    """
+    value = typer.prompt(
+        "Interval in seconds (0 to disable)",
+        default=default,
+        type=click.IntRange(min=0),
+    )
+    return value if value > 0 else None
+
+
 def _name_conflict(name: str, servers: list[Server], exclude_id: str | None = None) -> Server | None:
     """Return an existing server whose name equals `name` (case-insensitive), if any."""
     target = name.strip().lower()
@@ -370,7 +384,7 @@ def add_server(
 
         keep_alive_interval: int | None = None
         if typer.confirm("Enable SSH keep-alive?", default=False):
-            keep_alive_interval = typer.prompt("Interval in seconds", default=60, type=int)
+            keep_alive_interval = _prompt_keep_alive_interval(60)
 
         server = Server(
             name=name,
@@ -553,16 +567,9 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         keep_alive_interval = srv.keep_alive_interval
         if srv.keep_alive_interval:
             if typer.confirm(f"Change keep-alive interval? [{srv.keep_alive_interval}s]", default=False):
-                if typer.confirm("Disable keep-alive?", default=False):
-                    keep_alive_interval = None
-                else:
-                    keep_alive_interval = typer.prompt(
-                        "Interval in seconds",
-                        default=srv.keep_alive_interval,
-                        type=int,
-                    )
+                keep_alive_interval = _prompt_keep_alive_interval(srv.keep_alive_interval)
         elif typer.confirm("Enable SSH keep-alive?", default=False):
-            keep_alive_interval = typer.prompt("Interval in seconds", default=60, type=int)
+            keep_alive_interval = _prompt_keep_alive_interval(60)
 
         old_name = srv.name
         srv.name = name
@@ -574,7 +581,7 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         srv.password = password
         srv.jump_host = jump_host
         srv.notes = notes
-        srv.keep_alive_interval = keep_alive_interval if (keep_alive_interval and keep_alive_interval > 0) else None
+        srv.keep_alive_interval = keep_alive_interval
 
         # Validate the prospective jump chain before saving
         prospective = [s if s.id != srv.id else srv for s in all_servers]
