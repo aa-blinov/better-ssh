@@ -107,6 +107,17 @@ def connect(server: Server, copy_password: bool = True, all_servers: list[Server
 
     cmd = ["ssh", "-p", str(server.port)]
 
+    # Keep-alive: emit OpenSSH ServerAliveInterval/CountMax when the user
+    # has opted in. CountMax=3 matches OpenSSH's documented default and
+    # gives ~3*interval grace before declaring the connection dead.
+    if server.keep_alive_interval and server.keep_alive_interval > 0:
+        cmd += [
+            "-o",
+            f"ServerAliveInterval={server.keep_alive_interval}",
+            "-o",
+            "ServerAliveCountMax=3",
+        ]
+
     # ProxyJump chain
     if server.jump_host:
         try:

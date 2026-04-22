@@ -368,6 +368,10 @@ def add_server(
         if typer.confirm("Add a note?", default=False):
             notes = typer.prompt("Note") or None
 
+        keep_alive_interval: int | None = None
+        if typer.confirm("Enable SSH keep-alive?", default=False):
+            keep_alive_interval = typer.prompt("Interval in seconds", default=60, type=int)
+
         server = Server(
             name=name,
             host=host,
@@ -377,6 +381,7 @@ def add_server(
             key_path=key_path,
             jump_host=jump_host,
             notes=notes,
+            keep_alive_interval=keep_alive_interval,
         )
 
         error = _check_jump_cycle(existing_servers, server)
@@ -545,6 +550,20 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         elif typer.confirm("Add a note?", default=False):
             notes = typer.prompt("Note") or None
 
+        keep_alive_interval = srv.keep_alive_interval
+        if srv.keep_alive_interval:
+            if typer.confirm(f"Change keep-alive interval? [{srv.keep_alive_interval}s]", default=False):
+                if typer.confirm("Disable keep-alive?", default=False):
+                    keep_alive_interval = None
+                else:
+                    keep_alive_interval = typer.prompt(
+                        "Interval in seconds",
+                        default=srv.keep_alive_interval,
+                        type=int,
+                    )
+        elif typer.confirm("Enable SSH keep-alive?", default=False):
+            keep_alive_interval = typer.prompt("Interval in seconds", default=60, type=int)
+
         old_name = srv.name
         srv.name = name
         srv.host = host
@@ -555,6 +574,7 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         srv.password = password
         srv.jump_host = jump_host
         srv.notes = notes
+        srv.keep_alive_interval = keep_alive_interval if (keep_alive_interval and keep_alive_interval > 0) else None
 
         # Validate the prospective jump chain before saving
         prospective = [s if s.id != srv.id else srv for s in all_servers]

@@ -23,6 +23,7 @@ class Server(BaseModel):
     tags: list[str] = Field(default_factory=list)
     notes: str | None = None
     jump_host: str | None = None  # name of another saved server to use as ProxyJump
+    keep_alive_interval: int | None = None  # seconds; None disables ServerAliveInterval
 
     def display(self) -> str:
         """Return formatted server display string."""

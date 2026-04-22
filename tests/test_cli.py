@@ -419,6 +419,59 @@ def test_list_shows_notes_column_when_any_server_has_notes(cli_with_servers: Cli
     assert "Notes" in result.stdout
 
 
+def test_add_command_confirms_keep_alive_stores_interval(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test add: confirming keep-alive prompts for interval and stores the value."""
+    prompts: list[str] = []
+
+    def fake_prompt(text: str, *a, **kw):
+        prompts.append(text)
+        if text == "Interval in seconds":
+            return 120
+        return ""
+
+    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: text == "Enable SSH keep-alive?",
+    )
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Alive", "--host", "a.example", "--port", "22", "--username", "u"],
+    )
+
+    assert result.exit_code == 0
+    assert "Interval in seconds" in prompts
+    added = next(s for s in load_servers() if s.name == "Alive")
+    assert added.keep_alive_interval == 120
+
+
+def test_edit_can_disable_existing_keep_alive(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit can turn off keep-alive on a server that already has it set."""
+    save_servers([Server(id="k-1", name="Alive", host="a.example", username="u", keep_alive_interval=60)])
+
+    prompt_values = iter(["Alive", "a.example", 22, "u"])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: text.startswith(("Change keep-alive interval?", "Disable keep-alive?")),
+    )
+
+    result = runner.invoke(app, ["edit", "Alive"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "k-1")
+    assert updated.keep_alive_interval is None
+
+
 def test_list_hides_notes_column_when_no_notes(
     runner: CliRunner,
     temp_config_dir: Path,
@@ -606,6 +659,7 @@ def test_edit_no_key_shows_confirm_not_path_prompt(
         "Add password?",
         "Use a jump host (ProxyJump)?",
         "Add a note?",
+        "Enable SSH keep-alive?",
     ]
     # No key/cert path prompts — user declined via confirm
     assert not any("path" in p.lower() for p in prompt_calls)
@@ -643,6 +697,7 @@ def test_edit_existing_password_does_not_ask_clear_password(
         "Change password?",
         "Use a jump host (ProxyJump)?",
         "Change note? [Production web server]",
+        "Enable SSH keep-alive?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-001")
@@ -676,6 +731,7 @@ def test_edit_existing_key_path_can_be_cleared(
         "Add password?",
         "Use a jump host (ProxyJump)?",
         "Add a note?",
+        "Enable SSH keep-alive?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-002")
