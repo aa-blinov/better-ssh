@@ -43,6 +43,7 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Per-server port forwarding presets (local `-L`, remote `-R`, dynamic SOCKS `-D`)
 - Free-form notes and tags attached to each server
 - Detailed per-server card view (`bssh view <name>`)
+- Time-sorted "recents" list (`bssh recent`) with a relative `Last used` column
 - Server management (add, edit, remove, list)
 - `bssh ls <query>` filter by name, host, user, tag, id prefix, or jump host
 - Server availability checking (ping individual or health check all)
@@ -182,7 +183,7 @@ Run `bssh <query>` to connect directly when the match is unique. If the query is
 
 Use `bssh pin <query>` to keep critical hosts above the normal recent/frequent ordering, and `bssh unpin <query>` to remove them from favorites.
 
-`bssh recent` (alias `r`) lists servers by most-recently-connected, newest first — independent of pin status. Cap the list with `--limit N` / `-n N` (default 10). Servers that were never connected via `bssh` don't appear.
+`bssh recent` (alias `r`) lists servers by most-recently-connected, newest first — independent of pin status. Cap the list with `--limit N` / `-n N` (default 10). Servers that were never connected via `bssh` don't appear. The rendered table includes a `Last used` column with a relative timestamp (`just now`, `5m ago`, `2h ago`, `3d ago`, or an ISO date for anything older than 30 days). The same column is shown in `bssh ls` once at least one server has a recorded connection.
 
 Most commands work without arguments and will present an interactive menu.
 
@@ -259,13 +260,14 @@ Empty-string clearing works here too: `--jump ""` drops the ProxyJump, `--notes 
 
 ### Server Notes, Tags, and Keep-Alive
 
-Three optional per-server fields surface as columns in the `ls` table when at least one server has them set:
+Four optional per-server fields surface as columns in the `ls` / `recent` tables when at least one server has them set:
 
 - **Notes** — free-form text attached to a server (`Notes` column, truncated at 40 chars). Edit with `bssh edit` or set at creation time with `--notes`.
 - **Tags** — small labels (e.g. `prod`, `db`, `eu-west`) used to organize and filter the list (`Tags` column). Tags are comma-separated in the interactive prompt or passed repeatedly as `-t prod -t db`. `bssh ls <query>` matches on tags, so `bssh ls prod` pulls every server labeled that way.
 - **Keep-Alive** — a `ServerAliveInterval` value in seconds. When set, `bssh connect` passes `-o ServerAliveInterval=<N> -o ServerAliveCountMax=3` to OpenSSH, preventing NAT/idle disconnects (`Alive` column, e.g. `60s`). Enter `0` at the prompt (or `--keep-alive 0`) to leave it disabled.
+- **Last used** — a relative timestamp (`5m ago`, `2h ago`, `3d ago`, or an ISO date for older) automatically recorded on every successful `bssh connect`. Surfaces in both `ls` and `recent` so you can see freshness at a glance.
 
-All three columns are auto-hidden when no server has a value set.
+All four columns are auto-hidden when no server has a value set.
 
 ### Port Forwarding
 
