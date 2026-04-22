@@ -60,7 +60,7 @@ def test_root_invocation_opens_connect_flow(runner: CliRunner, monkeypatch: pyte
     def fake_connect_cmd(query: str | None = None, no_copy: bool = False):
         calls.append((query, no_copy))
 
-    monkeypatch.setattr("app.cli.connect_cmd", fake_connect_cmd)
+    monkeypatch.setattr("app.cli.connection.connect_cmd", fake_connect_cmd)
 
     result = runner.invoke(app, [])
 
@@ -74,7 +74,7 @@ def test_root_invocation_propagates_connect_exit_code(runner: CliRunner, monkeyp
     def fake_connect_cmd(query: str | None = None, no_copy: bool = False):
         raise typer.Exit(7)
 
-    monkeypatch.setattr("app.cli.connect_cmd", fake_connect_cmd)
+    monkeypatch.setattr("app.cli.connection.connect_cmd", fake_connect_cmd)
 
     result = runner.invoke(app, [])
 
@@ -89,7 +89,7 @@ def test_help_does_not_trigger_default_connect(runner: CliRunner, monkeypatch: p
         nonlocal called
         called = True
 
-    monkeypatch.setattr("app.cli.connect_cmd", fake_connect_cmd)
+    monkeypatch.setattr("app.cli.connection.connect_cmd", fake_connect_cmd)
 
     result = runner.invoke(app, ["--help"])
 
@@ -120,7 +120,7 @@ def test_query_shortcut_connects_unique_match(cli_with_servers: CliRunner, monke
         return 17
 
     monkeypatch.setattr("app.cli.inquirer.select", fail_select)
-    monkeypatch.setattr("app.cli.connect", fake_connect)
+    monkeypatch.setattr("app.cli.connection.connect", fake_connect)
 
     result = cli_with_servers.invoke(app, ["Server3"])
 
@@ -150,7 +150,7 @@ def test_query_shortcut_ambiguous_match_opens_filtered_menu(
         return 19
 
     monkeypatch.setattr("app.cli.inquirer.select", fake_select)
-    monkeypatch.setattr("app.cli.connect", fake_connect)
+    monkeypatch.setattr("app.cli.connection.connect", fake_connect)
 
     result = cli_with_servers.invoke(app, ["TestServer"])
 
@@ -176,7 +176,7 @@ def test_query_shortcut_no_match_opens_full_menu(cli_with_servers: CliRunner, mo
         return 29
 
     monkeypatch.setattr("app.cli.inquirer.select", fake_select)
-    monkeypatch.setattr("app.cli.connect", fake_connect)
+    monkeypatch.setattr("app.cli.connection.connect", fake_connect)
 
     result = cli_with_servers.invoke(app, ["missing"])
 
@@ -193,9 +193,9 @@ def test_import_ssh_config_command_imports_hosts(
     config_file = temp_config_dir / "ssh_config"
     config_file.write_text("Host prod\n", encoding="utf-8")
 
-    monkeypatch.setattr("app.cli.get_default_ssh_config_path", lambda: config_file)
+    monkeypatch.setattr("app.cli.backup.get_default_ssh_config_path", lambda: config_file)
     monkeypatch.setattr(
-        "app.cli.import_ssh_config",
+        "app.cli.backup.import_ssh_config",
         lambda path: [
             Server(
                 name="prod",
@@ -250,9 +250,9 @@ def test_import_ssh_config_command_merge_preserves_metadata(
         def execute(self) -> str:
             return "Merge - update matching host names and keep everything else"
 
-    monkeypatch.setattr("app.cli.get_default_ssh_config_path", lambda: config_file)
+    monkeypatch.setattr("app.cli.backup.get_default_ssh_config_path", lambda: config_file)
     monkeypatch.setattr(
-        "app.cli.import_ssh_config",
+        "app.cli.backup.import_ssh_config",
         lambda path: [
             Server(
                 name="prod",
@@ -629,7 +629,7 @@ def test_encrypt_command_enables_and_encrypts_passwords(
 
     fake_key = tmp_path / "id_ed25519"
     fake_key.write_bytes(b"fake key material")
-    monkeypatch.setattr("app.cli.find_ssh_key_for_encryption", lambda: fake_key)
+    monkeypatch.setattr("app.cli.crypto.find_ssh_key_for_encryption", lambda: fake_key)
     monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: True)
 
     result = runner.invoke(app, ["encrypt"])
@@ -652,7 +652,7 @@ def test_encrypt_command_refuses_when_no_ssh_key_found(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Test `bssh encrypt` fails cleanly when no SSH key is discoverable."""
-    monkeypatch.setattr("app.cli.find_ssh_key_for_encryption", lambda: None)
+    monkeypatch.setattr("app.cli.crypto.find_ssh_key_for_encryption", lambda: None)
 
     result = runner.invoke(app, ["encrypt"])
 
@@ -682,7 +682,7 @@ def test_encrypt_command_cancelled_does_not_enable(
     """Test declining the encrypt confirm leaves settings untouched."""
     fake_key = tmp_path / "id_ed25519"
     fake_key.write_bytes(b"fake key material")
-    monkeypatch.setattr("app.cli.find_ssh_key_for_encryption", lambda: fake_key)
+    monkeypatch.setattr("app.cli.crypto.find_ssh_key_for_encryption", lambda: fake_key)
     monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
 
     result = runner.invoke(app, ["encrypt"])
@@ -752,7 +752,7 @@ def test_ping_command_success_reports_reachable(
 ):
     """Test `bssh ping <name>` reports reachable when the port is open."""
     save_servers([Server(id="p-1", name="Alpha", host="a.example", username="u")])
-    monkeypatch.setattr("app.cli.check_server_availability", lambda s, **kw: (True, "reachable", 12.5))
+    monkeypatch.setattr("app.cli.health.check_server_availability", lambda s, **kw: (True, "reachable", 12.5))
 
     result = runner.invoke(app, ["ping", "Alpha"])
 
@@ -768,7 +768,7 @@ def test_ping_command_failure_exits_nonzero(
 ):
     """Test `bssh ping` exits with code 1 when the server is unreachable."""
     save_servers([Server(id="p-1", name="Alpha", host="a.example", username="u")])
-    monkeypatch.setattr("app.cli.check_server_availability", lambda s, **kw: (False, "timeout", 3000.0))
+    monkeypatch.setattr("app.cli.health.check_server_availability", lambda s, **kw: (False, "timeout", 3000.0))
 
     result = runner.invoke(app, ["ping", "Alpha"])
 
@@ -801,7 +801,7 @@ def test_health_command_all_available_exits_zero(
             Server(id="p-2", name="Beta", host="b.example", username="u"),
         ]
     )
-    monkeypatch.setattr("app.cli.check_server_availability", lambda s, **kw: (True, "reachable", 10.0))
+    monkeypatch.setattr("app.cli.health.check_server_availability", lambda s, **kw: (True, "reachable", 10.0))
 
     result = runner.invoke(app, ["health"])
 
@@ -825,7 +825,7 @@ def test_health_command_partial_failures_exits_nonzero(
     def fake_check(server, **kw):
         return (server.name == "Alpha", "reachable" if server.name == "Alpha" else "timeout", 10.0)
 
-    monkeypatch.setattr("app.cli.check_server_availability", fake_check)
+    monkeypatch.setattr("app.cli.health.check_server_availability", fake_check)
 
     result = runner.invoke(app, ["health"])
 
@@ -2134,7 +2134,7 @@ def test_root_invocation_interactively_connects_selected_server(
         return 0
 
     monkeypatch.setattr("app.cli.inquirer.select", fake_select)
-    monkeypatch.setattr("app.cli.connect", fake_connect)
+    monkeypatch.setattr("app.cli.connection.connect", fake_connect)
 
     result = cli_with_servers.invoke(app, [])
 
@@ -2203,7 +2203,7 @@ def test_root_invocation_sorts_pinned_servers_before_recents(
         return FakePrompt()
 
     monkeypatch.setattr("app.cli.inquirer.select", fake_select)
-    monkeypatch.setattr("app.cli.connect", lambda server, copy_password=True, all_servers=None: 0)
+    monkeypatch.setattr("app.cli.connection.connect", lambda server, copy_password=True, all_servers=None: 0)
 
     result = runner.invoke(app, [])
 
@@ -2350,14 +2350,14 @@ def test_connect_records_use_only_on_success(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Test connect records server usage on rc=0 and rc=130, but not on other exit codes."""
-    monkeypatch.setattr("app.cli.connect", lambda srv, copy_password=True, all_servers=None: 1)
+    monkeypatch.setattr("app.cli.connection.connect", lambda srv, copy_password=True, all_servers=None: 1)
 
     cli_with_servers.invoke(app, ["connect", "TestServer1"])
 
     updated = next(s for s in load_servers() if s.id == "test-id-001")
     assert updated.use_count == 0  # not recorded for rc=1
 
-    monkeypatch.setattr("app.cli.connect", lambda srv, copy_password=True, all_servers=None: 130)
+    monkeypatch.setattr("app.cli.connection.connect", lambda srv, copy_password=True, all_servers=None: 130)
     cli_with_servers.invoke(app, ["connect", "TestServer1"])
 
     updated = next(s for s in load_servers() if s.id == "test-id-001")
