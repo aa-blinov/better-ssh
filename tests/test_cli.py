@@ -1290,6 +1290,124 @@ def test_pin_renders_bracketed_name_literally(
     assert "[weird]server" in result.stdout
 
 
+def test_add_with_x11_flag_stores_true(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --x11 on add sets x11_forwarding=True without interactive prompts."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "GUI", "--host", "g.example", "--port", "22", "--username", "u", "--x11"],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "GUI")
+    assert added.x11_forwarding is True
+
+
+def test_add_without_x11_flag_defaults_false(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test omitting --x11 on add keeps x11_forwarding at its False default."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Plain", "--host", "p.example", "--port", "22", "--username", "u"],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "Plain")
+    assert added.x11_forwarding is False
+
+
+def test_edit_with_x11_enables_it(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit --x11 turns X11 forwarding on for an existing server."""
+    save_servers([Server(id="e-1", name="X", host="h.example", username="u")])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "X", "--x11"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "e-1")
+    assert updated.x11_forwarding is True
+
+
+def test_edit_with_no_x11_disables_it(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit --no-x11 turns X11 forwarding off."""
+    save_servers([Server(id="e-1", name="X", host="h.example", username="u", x11_forwarding=True)])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "X", "--no-x11"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "e-1")
+    assert updated.x11_forwarding is False
+
+
+def test_edit_without_x11_flag_preserves_current_value(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test omitting both --x11 and --no-x11 keeps the existing True setting."""
+    save_servers([Server(id="e-1", name="X", host="h.example", username="u", x11_forwarding=True)])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "X", "--host", "new.example"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "e-1")
+    assert updated.x11_forwarding is True
+    assert updated.host == "new.example"
+
+
+def test_view_shows_x11_row_when_enabled(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test view renders an X11 row for servers with x11_forwarding=True."""
+    save_servers([Server(id="e-1", name="GUI", host="h.example", username="u", x11_forwarding=True)])
+
+    result = runner.invoke(app, ["view", "GUI"])
+
+    assert result.exit_code == 0
+    assert "X11" in result.stdout
+    assert "enabled" in result.stdout
+
+
+def test_view_omits_x11_row_when_disabled(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test view does not show the X11 row for servers with the default False value."""
+    save_servers([Server(id="e-1", name="CLI", host="h.example", username="u")])
+
+    result = runner.invoke(app, ["view", "CLI"])
+
+    assert result.exit_code == 0
+    # The row label would be "X11 ..." — with the default False it should be absent.
+    assert "X11" not in result.stdout
+
+
 def test_view_shows_forwards_section(
     runner: CliRunner,
     temp_config_dir: Path,

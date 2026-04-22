@@ -57,6 +57,7 @@ def add_server(
     dynamic_forward: list[str] | None = typer.Option(
         None, "-D", help=r"Dynamic SOCKS forward, repeatable: \[bind:]port"
     ),
+    x11: bool = typer.Option(False, "--x11", help="Enable X11 forwarding (ssh -X)"),
 ):
     """Add a new server."""
     try:
@@ -147,6 +148,7 @@ def add_server(
             keep_alive_interval=keep_alive_interval,
             tags=tags,
             forwards=forwards,
+            x11_forwarding=x11,
         )
 
         error = check_jump_cycle(existing_servers, server)
@@ -190,6 +192,11 @@ def edit(
     remote_forward: list[str] | None = typer.Option(None, "-R", help="Remote forward (repeatable)"),
     dynamic_forward: list[str] | None = typer.Option(None, "-D", help="Dynamic SOCKS forward (repeatable)"),
     clear_forwards: bool = typer.Option(False, "--no-forwards", help="Clear all port forwards"),
+    x11: bool | None = typer.Option(
+        None,
+        "--x11/--no-x11",
+        help="Toggle X11 forwarding (ssh -X); omit to leave the current value",
+    ),
 ):
     """Edit a server."""
     if query is None:
@@ -365,6 +372,8 @@ def edit(
         srv.keep_alive_interval = keep_alive_interval
         srv.tags = tags
         srv.forwards = forwards
+        if x11 is not None:
+            srv.x11_forwarding = x11
 
         prospective = [s if s.id != srv.id else srv for s in all_servers]
         if old_name != name:
@@ -503,6 +512,9 @@ def view(query: str | None = typer.Argument(None, help="ID/name/partial name (op
 
     if srv.keep_alive_interval:
         table.add_row("Keep-alive", f"[green]{srv.keep_alive_interval}s[/green]")
+
+    if srv.x11_forwarding:
+        table.add_row("X11", "[green]enabled[/green] (ssh -X)")
 
     if srv.forwards:
         lines = "\n".join(escape(f.display()) for f in srv.forwards)

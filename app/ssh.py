@@ -125,6 +125,11 @@ def connect(server: Server, copy_password: bool = True, all_servers: list[Server
         flag = {"local": "-L", "remote": "-R", "dynamic": "-D"}[fwd.type]
         cmd += [flag, fwd.to_ssh_spec()]
 
+    # X11 forwarding: add the trusted-safe -X flag when the user opted in.
+    # Power users who need -Y can still configure it via ~/.ssh/config.
+    if server.x11_forwarding:
+        cmd += ["-X"]
+
     # ProxyJump chain
     if server.jump_host:
         try:

@@ -60,6 +60,7 @@ class Server(BaseModel):
     jump_host: str | None = None  # name of another saved server to use as ProxyJump
     keep_alive_interval: int | None = None  # seconds; None disables ServerAliveInterval
     forwards: list[Forward] = Field(default_factory=list)
+    x11_forwarding: bool = False  # emit `ssh -X` when True
 
     def display(self) -> str:
         """Return formatted server display string."""
