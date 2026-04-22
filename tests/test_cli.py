@@ -782,6 +782,78 @@ def test_remove_cascade_cancel_keeps_everything(
     assert t1.jump_host == "Bastion"
 
 
+def test_add_rejects_duplicate_name(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test add refuses to create a second server with an existing name (case-insensitive)."""
+    save_servers([Server(id="a-1", name="Prod", host="p.example", username="u")])
+
+    prompts: list[str] = []
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: prompts.append(text) or "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "prod", "--host", "new.example", "--port", "22", "--username", "root"],
+    )
+
+    assert result.exit_code == 1
+    assert "already exists" in result.stdout
+    # Nothing new saved
+    assert len(load_servers()) == 1
+    # Should have failed before prompting for key/password
+    assert "Password" not in prompts
+
+
+def test_edit_rejects_rename_to_existing_name(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit refuses to rename a server to an already-taken name."""
+    save_servers(
+        [
+            Server(id="a-1", name="Prod", host="p.example", username="u"),
+            Server(id="b-1", name="Stage", host="s.example", username="u"),
+        ]
+    )
+
+    prompt_values = iter(["Prod"])  # rename Stage -> Prod
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "Stage"])
+
+    assert result.exit_code == 1
+    assert "already exists" in result.stdout
+    # Stage kept its original name
+    servers = {s.id: s for s in load_servers()}
+    assert servers["b-1"].name == "Stage"
+
+
+def test_edit_keeping_same_name_is_allowed(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test edit without a rename does not trigger the name-uniqueness check."""
+    save_servers([Server(id="a-1", name="Prod", host="p.example", username="u")])
+
+    # Keep name (default), change host
+    prompt_values = iter(["Prod", "new.example", 22, "u"])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "Prod"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "a-1")
+    assert updated.name == "Prod"
+    assert updated.host == "new.example"
+
+
 def test_edit_rejects_cycle_at_save_time(
     runner: CliRunner,
     temp_config_dir: Path,

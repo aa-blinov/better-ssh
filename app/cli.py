@@ -93,6 +93,19 @@ def _sort_servers(servers: list[Server]) -> list[Server]:
 _NONE_JUMP_SENTINEL = "__none__"
 
 
+def _name_conflict(name: str, servers: list[Server], exclude_id: str | None = None) -> Server | None:
+    """Return an existing server whose name equals `name` (case-insensitive), if any."""
+    target = name.strip().lower()
+    if not target:
+        return None
+    for s in servers:
+        if s.id == exclude_id:
+            continue
+        if s.name.lower() == target:
+            return s
+    return None
+
+
 def _check_jump_cycle(servers: list[Server], server: Server) -> str | None:
     """Walk the prospective jump chain for `server` over `servers`.
 
@@ -291,6 +304,16 @@ def add_server(
 ):
     """Add a new server."""
     try:
+        existing_servers = storage.load_servers()
+
+        # Uniqueness check up front so we fail before prompting for credentials
+        if name:
+            conflict = _name_conflict(name, existing_servers)
+            if conflict:
+                console.print(f"[red]A server named '{conflict.name}' already exists (id: {conflict.id[:8]}).[/red]")
+                console.print("Pick a different name or edit the existing one with [cyan]bssh edit[/cyan].")
+                raise typer.Exit(1)
+
         key_path: str | None = None
         if typer.confirm("Add SSH key?", default=False):
             default_key = find_ssh_key()
@@ -303,7 +326,6 @@ def add_server(
         if typer.confirm("Add password?", default=False):
             password = typer.prompt("Password", hide_input=True, confirmation_prompt=True) or None
 
-        existing_servers = storage.load_servers()
         jump_host: str | None = None
         if jump:
             # Non-interactive: validate reference
@@ -427,6 +449,12 @@ def edit(query: str | None = typer.Argument(None, help="ID/name/partial name (op
 
     try:
         name = typer.prompt("Name", default=srv.name)
+        if name != srv.name:
+            conflict = _name_conflict(name, all_servers, exclude_id=srv.id)
+            if conflict:
+                console.print(f"[red]A server named '{conflict.name}' already exists (id: {conflict.id[:8]}).[/red]")
+                console.print("[dim]No changes saved.[/dim]")
+                raise typer.Exit(1)
         host = typer.prompt("Host", default=srv.host)
         port = typer.prompt("Port", default=srv.port, type=int)
         username = typer.prompt("Username", default=srv.username)
