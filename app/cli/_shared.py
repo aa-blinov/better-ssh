@@ -13,6 +13,7 @@ import typer
 from InquirerPy import inquirer
 from InquirerPy.base.control import Choice
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from ..domain import auth_label, favorite_label, jump_host_usage_map, parse_forward_spec, sort_servers
@@ -85,17 +86,26 @@ def _print_servers(servers: list[Server]) -> None:
 
     for s in sort_servers(servers):
         auth = auth_label(s)
-        row = [s.id[:8], favorite_label(s), s.name, f"{s.username}@{s.host}:{s.port}", auth]
+        # Escape every user-provided string before it reaches the Rich table;
+        # otherwise a server named "[red]evil[/red]" (or similar) would be
+        # parsed as markup and distort the rendered row.
+        row = [
+            s.id[:8],
+            favorite_label(s),
+            escape(s.name),
+            escape(f"{s.username}@{s.host}:{s.port}"),
+            auth,
+        ]
         if show_via:
-            row.append(s.jump_host or "")
+            row.append(escape(s.jump_host) if s.jump_host else "")
         if show_keepalive:
             row.append(f"{s.keep_alive_interval}s" if s.keep_alive_interval else "")
         if show_forwards:
             row.append(str(len(s.forwards)) if s.forwards else "")
         if show_tags:
-            row.append(", ".join(s.tags) if s.tags else "")
+            row.append(escape(", ".join(s.tags)) if s.tags else "")
         if show_notes:
-            row.append(s.notes or "")
+            row.append(escape(s.notes) if s.notes else "")
         table.add_row(*row)
 
     console.print(table)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typer
+from rich.markup import escape
 
 from .. import storage
 from ..domain import servers_matching_query
@@ -23,7 +24,7 @@ def list_servers(
     if query:
         matching = servers_matching_query(servers, query)
         if not matching:
-            console.print(f"[yellow]No servers match '{query}'.[/yellow]")
+            console.print(f"[yellow]No servers match '{escape(query)}'.[/yellow]")
             return
         _print_servers(matching)
         return
@@ -47,14 +48,14 @@ def pin_server(query: str | None = typer.Argument(None, help="ID/name/partial na
             raise typer.Exit(1)
 
     if srv.favorite:
-        console.print(f"[yellow]Already pinned:[/yellow] {srv.name}")
+        console.print(f"[yellow]Already pinned:[/yellow] {escape(srv.name)}")
         return
 
     if not storage.set_server_favorite(srv.id, True):
         console.print("[red]Failed to pin server[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[green]Pinned:[/green] {srv.name}")
+    console.print(f"[green]Pinned:[/green] {escape(srv.name)}")
 
 
 @app.command("unpin", help="Remove a server from pinned favorites.")
@@ -73,11 +74,11 @@ def unpin_server(query: str | None = typer.Argument(None, help="ID/name/partial 
             raise typer.Exit(1)
 
     if not srv.favorite:
-        console.print(f"[yellow]Server is not pinned:[/yellow] {srv.name}")
+        console.print(f"[yellow]Server is not pinned:[/yellow] {escape(srv.name)}")
         return
 
     if not storage.set_server_favorite(srv.id, False):
         console.print("[red]Failed to unpin server[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[green]Unpinned:[/green] {srv.name}")
+    console.print(f"[green]Unpinned:[/green] {escape(srv.name)}")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typer
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -65,7 +66,9 @@ def add_server(
         if name:
             conflict = name_conflict(name, existing_servers)
             if conflict:
-                console.print(f"[red]A server named '{conflict.name}' already exists (id: {conflict.id[:8]}).[/red]")
+                console.print(
+                    f"[red]A server named '{escape(conflict.name)}' already exists (id: {conflict.id[:8]}).[/red]"
+                )
                 console.print("Pick a different name or edit the existing one with [cyan]bssh edit[/cyan].")
                 raise typer.Exit(1)
 
@@ -94,7 +97,7 @@ def add_server(
             if jump:
                 match = next((s for s in existing_servers if s.name.lower() == jump.lower()), None)
                 if match is None:
-                    console.print(f"[red]Jump host '{jump}' not found in saved servers.[/red]")
+                    console.print(f"[red]Jump host '{escape(jump)}' not found in saved servers.[/red]")
                     raise typer.Exit(1)
                 jump_host = match.name
         elif typer.confirm("Use a jump host (ProxyJump)?", default=False):
@@ -152,7 +155,7 @@ def add_server(
             raise typer.Exit(1)
 
         storage.upsert_server(server)
-        console.print(f"[green]Added:[/green] {server.display()}  (id: {server.id})")
+        console.print(f"[green]Added:[/green] {escape(server.display())}  (id: {server.id})")
     except (KeyboardInterrupt, typer.Abort):
         console.print("\n[dim]Cancelled.[/dim]")
         raise typer.Exit(0)
@@ -206,7 +209,8 @@ def edit(
     if used_by:
         label = "server uses" if len(used_by) == 1 else "servers use"
         console.print(
-            f"[yellow]Note:[/yellow] {len(used_by)} {label} this as a jump host: [cyan]{', '.join(used_by)}[/cyan]"
+            f"[yellow]Note:[/yellow] {len(used_by)} {label} this as a jump host: "
+            f"[cyan]{escape(', '.join(used_by))}[/cyan]"
         )
         console.print("[dim]Renaming will update their references automatically.[/dim]")
 
@@ -218,7 +222,9 @@ def edit(
         if name != srv.name:
             conflict = name_conflict(name, all_servers, exclude_id=srv.id)
             if conflict:
-                console.print(f"[red]A server named '{conflict.name}' already exists (id: {conflict.id[:8]}).[/red]")
+                console.print(
+                    f"[red]A server named '{escape(conflict.name)}' already exists (id: {conflict.id[:8]}).[/red]"
+                )
                 console.print("[dim]No changes saved.[/dim]")
                 raise typer.Exit(1)
 
@@ -271,7 +277,7 @@ def edit(
             else:
                 match = next((s for s in all_servers if s.id != srv.id and s.name.lower() == jump.lower()), None)
                 if match is None:
-                    console.print(f"[red]Jump host '{jump}' not found in saved servers.[/red]")
+                    console.print(f"[red]Jump host '{escape(jump)}' not found in saved servers.[/red]")
                     console.print("[dim]No changes saved.[/dim]")
                     raise typer.Exit(1)
                 jump_host = match.name
@@ -379,7 +385,7 @@ def edit(
             storage.save_servers(all_servers)
             console.print(
                 f"[green]Saved.[/green] Updated {len(used_by)} jump-host reference(s): "
-                f"[cyan]{old_name}[/cyan] -> [cyan]{name}[/cyan]"
+                f"[cyan]{escape(old_name)}[/cyan] -> [cyan]{escape(name)}[/cyan]"
             )
         else:
             storage.upsert_server(srv)
@@ -416,7 +422,7 @@ def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (
             label = "server references" if len(dependents) == 1 else "servers reference"
             console.print(
                 f"[yellow]Warning:[/yellow] {len(dependents)} {label} "
-                f"this as a jump host: [cyan]{', '.join(s.name for s in dependents)}[/cyan]"
+                f"this as a jump host: [cyan]{escape(', '.join(s.name for s in dependents))}[/cyan]"
             )
             if not typer.confirm(
                 "Clear jump_host on those servers so they connect directly?",
@@ -458,25 +464,28 @@ def view(query: str | None = typer.Argument(None, help="ID/name/partial name (op
         if not srv:
             matching = servers_matching_query(all_servers, query)
             if matching:
-                srv = _select_server(matching, f"Select server to view for '{query}':")
+                srv = _select_server(matching, f"Select server to view for '{escape(query)}':")
             else:
-                console.print(f"[red]No server matches '{query}'.[/red]")
+                console.print(f"[red]No server matches '{escape(query)}'.[/red]")
                 raise typer.Exit(1)
 
     table = Table(show_header=False, box=None, padding=(0, 1))
     table.add_column("field", style="dim", no_wrap=True)
     table.add_column("value")
 
-    table.add_row("Name", f"[bold]{srv.name}[/bold]")
+    # Escape every user-provided string before it reaches Rich, so names,
+    # hosts, notes etc. containing square brackets render as literal text
+    # instead of being parsed as style tags.
+    table.add_row("Name", f"[bold]{escape(srv.name)}[/bold]")
     table.add_row("ID", srv.id)
-    table.add_row("Host", f"{srv.username}@{srv.host}:{srv.port}")
+    table.add_row("Host", escape(f"{srv.username}@{srv.host}:{srv.port}"))
 
     if srv.certificate_path:
-        auth_line = f"certificate [dim]({srv.certificate_path})[/dim]"
+        auth_line = f"certificate [dim]({escape(srv.certificate_path)})[/dim]"
         if srv.key_path:
-            auth_line += f" + key [dim]({srv.key_path})[/dim]"
+            auth_line += f" + key [dim]({escape(srv.key_path)})[/dim]"
     elif srv.key_path:
-        auth_line = f"key [dim]({srv.key_path})[/dim]"
+        auth_line = f"key [dim]({escape(srv.key_path)})[/dim]"
     elif srv.password:
         auth_line = "password [dim](set)[/dim]"
     else:
@@ -486,23 +495,24 @@ def view(query: str | None = typer.Argument(None, help="ID/name/partial name (op
     if srv.jump_host:
         try:
             chain = resolve_jump_chain(srv, all_servers)
-            chain_str = " -> ".join(f"{j.username}@{j.host}:{j.port}" for j in chain) + f" -> {srv.name}"
-            table.add_row("Jump chain", f"[cyan]{chain_str}[/cyan]")
+            hops = [escape(f"{j.username}@{j.host}:{j.port}") for j in chain]
+            hops.append(escape(srv.name))
+            table.add_row("Jump chain", f"[cyan]{' -> '.join(hops)}[/cyan]")
         except JumpResolutionError as exc:
-            table.add_row("Jump chain", f"[red]broken: {exc}[/red]")
+            table.add_row("Jump chain", f"[red]broken: {escape(str(exc))}[/red]")
 
     if srv.keep_alive_interval:
         table.add_row("Keep-alive", f"[green]{srv.keep_alive_interval}s[/green]")
 
     if srv.forwards:
-        lines = "\n".join(f.display() for f in srv.forwards)
+        lines = "\n".join(escape(f.display()) for f in srv.forwards)
         table.add_row("Forwards", f"[blue]{lines}[/blue]")
 
     if srv.tags:
-        table.add_row("Tags", "[magenta]" + ", ".join(srv.tags) + "[/magenta]")
+        table.add_row("Tags", f"[magenta]{escape(', '.join(srv.tags))}[/magenta]")
 
     if srv.notes:
-        table.add_row("Notes", srv.notes)
+        table.add_row("Notes", escape(srv.notes))
 
     table.add_row("Pinned", "yes" if srv.favorite else "no")
     table.add_row("Used", f"{srv.use_count} time(s)")
@@ -514,6 +524,7 @@ def view(query: str | None = typer.Argument(None, help="ID/name/partial name (op
     dependents = [s.name for s in all_servers if s.jump_host == srv.name and s.id != srv.id]
     if dependents:
         label = "server uses" if len(dependents) == 1 else "servers use"
-        table.add_row("Used as jump by", f"[yellow]{len(dependents)} {label}: {', '.join(dependents)}[/yellow]")
+        dependents_str = escape(", ".join(dependents))
+        table.add_row("Used as jump by", f"[yellow]{len(dependents)} {label}: {dependents_str}[/yellow]")
 
-    console.print(Panel(table, title=f"[bold]{srv.name}[/bold]", border_style="cyan", expand=False))
+    console.print(Panel(table, title=f"[bold]{escape(srv.name)}[/bold]", border_style="cyan", expand=False))
