@@ -15,7 +15,7 @@ from typer.testing import CliRunner
 from app.cli import _NONE_JUMP_SENTINEL, _prompt_keep_alive_interval, app
 from app.encryption import encrypt_password
 from app.models import Server
-from app.storage import get_or_create_encryption_salt, load_servers, save_servers, save_settings
+from app.storage import get_or_create_encryption_salt, is_encryption_enabled, load_servers, save_servers, save_settings
 
 
 @pytest.fixture
@@ -516,6 +516,332 @@ def test_add_with_empty_flag_values_stores_none(
     added = next(s for s in load_servers() if s.name == "Empty")
     assert added.key_path is None
     assert added.notes is None
+
+
+def test_import_command_replace_mode_replaces_all_servers(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test `bssh import` in Replace mode wipes existing servers and loads from file."""
+    save_servers([Server(id="old-1", name="Old", host="o.example", username="u")])
+
+    backup = tmp_path / "backup.json"
+    backup.write_text(
+        '{"servers": [{"id": "new-1", "name": "New", "host": "n.example", "port": 22, "username": "u"}]}',
+        encoding="utf-8",
+    )
+
+    class PickReplace:
+        def execute(self) -> str:
+            return "Replace all - delete existing servers and import new ones"
+
+    monkeypatch.setattr("app.cli.inquirer.select", lambda **kw: PickReplace())
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: True)
+
+    result = runner.invoke(app, ["import", str(backup)])
+
+    assert result.exit_code == 0
+    names = {s.name for s in load_servers()}
+    assert names == {"New"}
+
+
+def test_import_command_merge_mode_preserves_existing(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test `bssh import` in Merge mode keeps existing servers and upserts by id."""
+    save_servers([Server(id="keep-1", name="Keep", host="k.example", username="u")])
+
+    backup = tmp_path / "backup.json"
+    backup.write_text(
+        '{"servers": [{"id": "new-1", "name": "New", "host": "n.example", "port": 22, "username": "u"}]}',
+        encoding="utf-8",
+    )
+
+    class PickMerge:
+        def execute(self) -> str:
+            return "Merge - keep existing servers and add/update from import"
+
+    monkeypatch.setattr("app.cli.inquirer.select", lambda **kw: PickMerge())
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: True)
+
+    result = runner.invoke(app, ["import", str(backup)])
+
+    assert result.exit_code == 0
+    names = {s.name for s in load_servers()}
+    assert names == {"Keep", "New"}
+
+
+def test_import_command_rejects_missing_file(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+):
+    """Test `bssh import` on a non-existent file exits with an error."""
+    result = runner.invoke(app, ["import", str(tmp_path / "missing.json")])
+
+    assert result.exit_code == 1
+    assert "File not found" in result.stdout
+
+
+def test_import_command_rejects_bad_json(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+):
+    """Test `bssh import` on malformed JSON exits with a clear error."""
+    bad = tmp_path / "broken.json"
+    bad.write_text("not json at all {", encoding="utf-8")
+
+    result = runner.invoke(app, ["import", str(bad)])
+
+    assert result.exit_code == 1
+    assert "Failed to read" in result.stdout
+
+
+def test_import_command_rejects_missing_servers_field(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+):
+    """Test `bssh import` fails cleanly when 'servers' key is absent."""
+    bad = tmp_path / "empty.json"
+    bad.write_text('{"version": 1}', encoding="utf-8")
+
+    result = runner.invoke(app, ["import", str(bad)])
+
+    assert result.exit_code == 1
+    assert "missing 'servers' field" in result.stdout
+
+
+def test_encrypt_command_enables_and_encrypts_passwords(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test `bssh encrypt` enables encryption, encrypts plaintext passwords in storage."""
+    save_servers([Server(id="s-1", name="S", host="h.example", username="u", password="plain-pass")])
+
+    fake_key = tmp_path / "id_ed25519"
+    fake_key.write_bytes(b"fake key material")
+    monkeypatch.setattr("app.cli.find_ssh_key_for_encryption", lambda: fake_key)
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: True)
+
+    result = runner.invoke(app, ["encrypt"])
+
+    assert result.exit_code == 0
+    assert "Encryption enabled" in result.stdout
+
+    # Storage file must now contain ciphertext, not plaintext
+    cfg_file = temp_config_dir / "servers.json"
+    raw = cfg_file.read_text(encoding="utf-8")
+    assert "plain-pass" not in raw
+    # load_servers transparently decrypts so the password is recoverable
+    loaded = next(s for s in load_servers() if s.id == "s-1")
+    assert loaded.password == "plain-pass"
+
+
+def test_encrypt_command_refuses_when_no_ssh_key_found(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh encrypt` fails cleanly when no SSH key is discoverable."""
+    monkeypatch.setattr("app.cli.find_ssh_key_for_encryption", lambda: None)
+
+    result = runner.invoke(app, ["encrypt"])
+
+    assert result.exit_code == 1
+    assert "SSH key not found" in result.stdout
+
+
+def test_encrypt_command_already_enabled_is_idempotent(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh encrypt` is a no-op when encryption is already on."""
+    save_settings({"encryption_enabled": True})
+
+    result = runner.invoke(app, ["encrypt"])
+
+    assert result.exit_code == 0
+    assert "already enabled" in result.stdout.lower()
+
+
+def test_encrypt_command_cancelled_does_not_enable(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test declining the encrypt confirm leaves settings untouched."""
+    fake_key = tmp_path / "id_ed25519"
+    fake_key.write_bytes(b"fake key material")
+    monkeypatch.setattr("app.cli.find_ssh_key_for_encryption", lambda: fake_key)
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["encrypt"])
+
+    assert result.exit_code == 0
+    assert "Cancelled" in result.stdout
+    # Settings file should still report encryption as off
+    assert is_encryption_enabled() is False
+
+
+def test_decrypt_command_disables_and_plainifies_passwords(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test `bssh decrypt` turns encryption off and writes plaintext passwords."""
+    # First enable encryption so save_servers encrypts the password
+    fake_key = tmp_path / "id_ed25519"
+    fake_key.write_bytes(b"fake key material")
+    monkeypatch.setattr("app.encryption.find_ssh_key_for_encryption", lambda: fake_key)
+    save_settings({"encryption_enabled": True})
+    save_servers([Server(id="s-1", name="S", host="h.example", username="u", password="secret")])
+
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: True)
+
+    result = runner.invoke(app, ["decrypt"])
+
+    assert result.exit_code == 0
+    assert "Encryption disabled" in result.stdout
+    # Plaintext must now live in servers.json
+    cfg_file = temp_config_dir / "servers.json"
+    raw = cfg_file.read_text(encoding="utf-8")
+    assert "secret" in raw
+
+
+def test_decrypt_command_already_disabled_is_idempotent(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh decrypt` is a no-op when encryption is already off."""
+    result = runner.invoke(app, ["decrypt"])
+
+    assert result.exit_code == 0
+    assert "already disabled" in result.stdout.lower()
+
+
+def test_encryption_status_reports_state(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh encryption-status` shows enabled/disabled correctly."""
+    result = runner.invoke(app, ["encryption-status"])
+    assert result.exit_code == 0
+    assert "disabled" in result.stdout.lower()
+
+    save_settings({"encryption_enabled": True, "encryption_key_source": "/fake/key"})
+    result = runner.invoke(app, ["es"])  # alias
+    assert result.exit_code == 0
+    assert "enabled" in result.stdout.lower()
+
+
+def test_ping_command_success_reports_reachable(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh ping <name>` reports reachable when the port is open."""
+    save_servers([Server(id="p-1", name="Alpha", host="a.example", username="u")])
+    monkeypatch.setattr("app.cli.check_server_availability", lambda s, **kw: (True, "reachable", 12.5))
+
+    result = runner.invoke(app, ["ping", "Alpha"])
+
+    assert result.exit_code == 0
+    assert "reachable" in result.stdout
+    assert "u@a.example" in result.stdout
+
+
+def test_ping_command_failure_exits_nonzero(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh ping` exits with code 1 when the server is unreachable."""
+    save_servers([Server(id="p-1", name="Alpha", host="a.example", username="u")])
+    monkeypatch.setattr("app.cli.check_server_availability", lambda s, **kw: (False, "timeout", 3000.0))
+
+    result = runner.invoke(app, ["ping", "Alpha"])
+
+    assert result.exit_code == 1
+    assert "timeout" in result.stdout
+
+
+def test_ping_command_unknown_server_exits_nonzero(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh ping <unknown>` fails fast with a clear message."""
+    save_servers([Server(id="p-1", name="Alpha", host="a.example", username="u")])
+
+    result = runner.invoke(app, ["ping", "Ghost"])
+
+    assert result.exit_code == 1
+    assert "Server not found" in result.stdout
+
+
+def test_health_command_all_available_exits_zero(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh health` exits 0 when every server is reachable."""
+    save_servers(
+        [
+            Server(id="p-1", name="Alpha", host="a.example", username="u"),
+            Server(id="p-2", name="Beta", host="b.example", username="u"),
+        ]
+    )
+    monkeypatch.setattr("app.cli.check_server_availability", lambda s, **kw: (True, "reachable", 10.0))
+
+    result = runner.invoke(app, ["health"])
+
+    assert result.exit_code == 0
+    assert "2/2 servers available" in result.stdout
+
+
+def test_health_command_partial_failures_exits_nonzero(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh health` exits 1 when any server is unreachable."""
+    save_servers(
+        [
+            Server(id="p-1", name="Alpha", host="a.example", username="u"),
+            Server(id="p-2", name="Beta", host="b.example", username="u"),
+        ]
+    )
+
+    def fake_check(server, **kw):
+        return (server.name == "Alpha", "reachable" if server.name == "Alpha" else "timeout", 10.0)
+
+    monkeypatch.setattr("app.cli.check_server_availability", fake_check)
+
+    result = runner.invoke(app, ["health"])
+
+    assert result.exit_code == 1
+    assert "1/2 servers available" in result.stdout
+
+
+def test_health_command_empty_state(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test `bssh health` on an empty server list shows the empty-state message."""
+    result = runner.invoke(app, ["health"])
+
+    assert result.exit_code == 1
+    assert "No servers found" in result.stdout
 
 
 def test_view_shows_all_fields_for_server(
