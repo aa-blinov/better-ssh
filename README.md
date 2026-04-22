@@ -17,6 +17,7 @@ A command-line tool for managing SSH connections with an interactive interface, 
   - [Adding Servers Non-Interactively](#adding-servers-non-interactively)
   - [Server Notes, Tags, and Keep-Alive](#server-notes-tags-and-keep-alive)
   - [Port Forwarding](#port-forwarding)
+  - [X11 Forwarding](#x11-forwarding)
   - [Viewing a Single Server](#viewing-a-single-server)
 - [Jump Hosts (ProxyJump)](#jump-hosts-proxyjump)
 - [Configuration](#configuration)
@@ -303,6 +304,25 @@ Editing an existing server's forwards:
 - Passing no forward-related flags keeps the existing list and opens the interactive prompt when no other flags trigger non-interactive mode.
 
 `bssh ls` shows a `Fwd` column with the count (hidden when nobody has any). `bssh view <name>` lists each forward on its own line.
+
+### X11 Forwarding
+
+Set `x11_forwarding` on a server to have `bssh connect` pass `-X` to OpenSSH. GUI apps launched on the remote side will try to render through a local X11 display.
+
+```bash
+bssh add --name workstation --host ws.example --username dev --x11
+bssh edit workstation --x11       # turn on
+bssh edit workstation --no-x11    # turn off
+bssh view workstation             # shows "X11: enabled (ssh -X)" row when on
+```
+
+**Prerequisites on the client side:**
+
+- **Linux** — an X11 display is usually already running; nothing extra to install.
+- **macOS** — install [XQuartz](https://www.xquartz.org/) and log out/in once so `$DISPLAY` is set.
+- **Windows** — install an X server: VcXsrv, Xming, or use WSLg (Windows 11). Without one, OpenSSH will log `X11 forwarding request failed` and GUI apps will fail with `Can't open display`.
+
+**`-X` vs `-Y`:** `bssh` emits `-X` (untrusted mode) which is the safer default. Some X11 apps — older `xterm`, certain Matplotlib backends — fail under the X11 SECURITY extension and need trusted mode (`-Y`). If you hit `BadAccess` / `SECURITY` errors, enable `ForwardX11Trusted yes` for that host in `~/.ssh/config` — `bssh`'s `-X` composes with your SSH config, so the directive takes effect.
 
 ### Viewing a Single Server
 
