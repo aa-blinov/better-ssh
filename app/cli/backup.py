@@ -13,7 +13,7 @@ from .. import storage
 from ..domain import auth_label
 from ..encryption import encrypt_password
 from ..models import Server
-from ..ssh_config import get_default_ssh_config_path, import_ssh_config
+from ..ssh_config import get_default_ssh_config_path, import_ssh_config, render_servers_as_ssh_config
 from ._shared import _merge_servers_by_name, app, console
 
 
@@ -264,3 +264,48 @@ def import_ssh_config_cmd(
     storage.save_servers(final_servers)
     console.print(f"[green]Successfully imported {len(imported_servers)} SSH host(s).[/green]")
     console.print(f"Total servers: {len(final_servers)}")
+
+
+@app.command("export-ssh-config", help="Export servers to an OpenSSH config file. Alias: esc.")
+@app.command("esc", hidden=True)
+def export_ssh_config_cmd(
+    output: str = typer.Argument(..., help="Output path (e.g., ~/.ssh/config.bssh or ~/.ssh/config.d/bssh.conf)"),
+):
+    """Export saved servers as an OpenSSH-config-compatible file.
+
+    The reverse of `bssh isc`: generate Host blocks for every saved server with
+    the fields that have an ssh_config equivalent (HostName, User, Port,
+    IdentityFile, CertificateFile, ProxyJump, ServerAliveInterval, ForwardX11,
+    LocalForward/RemoteForward/DynamicForward). Passwords, tags and notes are
+    emitted as leading comments since ssh_config has no native syntax for them.
+    """
+    servers = storage.load_servers()
+    if not servers:
+        console.print("[yellow]No servers to export.[/yellow]")
+        raise typer.Exit(1)
+
+    output_path = Path(output).expanduser()
+
+    if output_path.exists():
+        try:
+            if not typer.confirm(f"File {escape(str(output_path))!r} already exists. Overwrite?", default=False):
+                console.print("[dim]Cancelled.[/dim]")
+                raise typer.Exit(0)
+        except (KeyboardInterrupt, typer.Abort):
+            console.print("\n[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+    content = render_servers_as_ssh_config(servers)
+
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content, encoding="utf-8")
+    except Exception as e:
+        console.print(f"[red]Export failed:[/red] {escape(str(e))}")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Exported {len(servers)} server(s) to:[/green] {escape(str(output_path.absolute()))}")
+    console.print(
+        f"[dim]Activate by adding [cyan]Include {escape(str(output_path))}[/cyan] "
+        f"to your ~/.ssh/config, or pass [cyan]-F {escape(str(output_path))}[/cyan] to ssh directly.[/dim]"
+    )
