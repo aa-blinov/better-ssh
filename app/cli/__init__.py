@@ -42,6 +42,7 @@ from . import crypto as _crypto  # noqa: F401
 from . import health as _health  # noqa: F401
 from . import manage as _manage  # noqa: F401
 from . import organize as _organize  # noqa: F401
+from . import transfer as _transfer  # noqa: F401
 from ._shared import (
     _NONE_JUMP_SENTINEL,
     _prompt_keep_alive_interval,

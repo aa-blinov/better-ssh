@@ -17,6 +17,7 @@ A command-line tool for managing SSH connections with an interactive interface, 
   - [Adding Servers Non-Interactively](#adding-servers-non-interactively)
   - [Server Notes, Tags, and Keep-Alive](#server-notes-tags-and-keep-alive)
   - [Port Forwarding](#port-forwarding)
+  - [File Transfer (put / get)](#file-transfer-put--get)
   - [X11 Forwarding](#x11-forwarding)
   - [Viewing a Single Server](#viewing-a-single-server)
 - [Jump Hosts (ProxyJump)](#jump-hosts-proxyjump)
@@ -43,6 +44,7 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Optional SSH keep-alive per server (ServerAliveInterval)
 - Per-server port forwarding presets (local `-L`, remote `-R`, dynamic SOCKS `-D`)
 - Optional X11 forwarding per server (`ssh -X`)
+- File transfer (`bssh put` / `bssh get`) that reuses a server's stored profile
 - Free-form notes and tags attached to each server
 - Detailed per-server card view (`bssh view <name>`)
 - Time-sorted "recents" list (`bssh recent`) with a relative `Last used` column
@@ -166,12 +168,14 @@ Commands:
   encrypt             Enable password encryption.     Alias: enc
   encryption-status   Show encryption status.         Alias: es
   export              Export servers to JSON file.    Alias: ex
+  get                 Download a remote file/dir (scp).
   health              Check all servers availability. Alias: h
   import              Import servers from JSON file.  Alias: im
   import-ssh-config   Import hosts from SSH config.   Alias: isc
   list                Show list of servers.           Alias: ls
   pin                 Pin a server to the top of lists.
   ping                Check server availability.      Alias: p
+  put                 Upload a local file/dir (scp).
   recent              Show recently used servers.     Alias: r
   remove              Remove a server.                Alias: rm
   show-pass           Show password.                  Alias: sp
@@ -304,6 +308,34 @@ Editing an existing server's forwards:
 - Passing no forward-related flags keeps the existing list and opens the interactive prompt when no other flags trigger non-interactive mode.
 
 `bssh ls` shows a `Fwd` column with the count (hidden when nobody has any). `bssh view <name>` lists each forward on its own line.
+
+### File Transfer (put / get)
+
+`bssh put` uploads and `bssh get` downloads, using `scp` under the hood and composing with the server's saved profile (port, key, certificate, jump host, keep-alive).
+
+```bash
+# Upload
+bssh put prod-db ./backup.sql /var/backups/backup.sql
+bssh put prod-db ./releases -r -C              # directory with compression
+
+# Download
+bssh get prod-db /var/log/app.log ./app.log
+bssh get prod-db /etc/nginx -r ./nginx-snapshot
+```
+
+Flag reference:
+
+| Flag | Short | Purpose |
+| --- | --- | --- |
+| `--recursive` | `-r` | Recurse into directories (scp `-r`) |
+| `--compress` | `-C` | Enable scp compression |
+
+Notes:
+
+- Port forwards (`-L`/`-R`/`-D`) and X11 on the server profile are **not** applied to transfers — they're connection-only settings.
+- Password authentication prompts come from OpenSSH itself; `bssh`'s clipboard copy is only wired into `bssh connect`, not put/get.
+- ProxyJump uses the server's stored `jump_host` chain, same as `connect`.
+- Requires `scp` on PATH (shipped with OpenSSH client tools). Missing binary -> exit code 127.
 
 ### X11 Forwarding
 
@@ -502,6 +534,7 @@ uv run pytest --cov=app --cov-report=html       # with coverage report
 - `tests/test_storage.py` — Configuration persistence tests
 - `tests/test_ssh.py` — SSH command and availability tests
 - `tests/test_ssh_config.py` — SSH config importer tests
+- `tests/test_transfer.py` — put / get scp wrapper tests
 - `tests/test_cli.py` — CLI commands and interface tests
 
 **Source Layout:**
@@ -523,6 +556,7 @@ app/
     crypto.py       encrypt, decrypt, encryption-status
     backup.py       export, import, import-ssh-config
     health.py       ping, health
+    transfer.py     put, get (scp wrappers)
 ```
 
 ### Submitting Changes
