@@ -7,10 +7,13 @@ pins down the contract before these helpers are extracted into app.domain.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from app.domain import (
     check_jump_cycle,
+    format_relative_time,
     jump_host_usage_map,
     name_conflict,
     parse_forward_spec,
@@ -304,3 +307,42 @@ def test_parse_forward_rejects_non_integer_port():
 def test_parse_forward_rejects_empty_remote_host():
     with pytest.raises(ValueError, match="remote host is empty"):
         parse_forward_spec("5432::5432", "local")
+
+
+# ---------------------------------------------------------------------------
+# format_relative_time
+# ---------------------------------------------------------------------------
+
+_NOW = datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC)
+
+
+def test_format_relative_time_seconds_ago_is_just_now():
+    assert format_relative_time(_NOW - timedelta(seconds=30), now=_NOW) == "just now"
+
+
+def test_format_relative_time_minutes_ago():
+    assert format_relative_time(_NOW - timedelta(minutes=5), now=_NOW) == "5m ago"
+    assert format_relative_time(_NOW - timedelta(minutes=59), now=_NOW) == "59m ago"
+
+
+def test_format_relative_time_hours_ago():
+    assert format_relative_time(_NOW - timedelta(hours=1), now=_NOW) == "1h ago"
+    assert format_relative_time(_NOW - timedelta(hours=23), now=_NOW) == "23h ago"
+
+
+def test_format_relative_time_days_ago():
+    assert format_relative_time(_NOW - timedelta(days=1), now=_NOW) == "1d ago"
+    assert format_relative_time(_NOW - timedelta(days=29), now=_NOW) == "29d ago"
+
+
+def test_format_relative_time_older_than_month_falls_back_to_iso_date():
+    result = format_relative_time(_NOW - timedelta(days=60), now=_NOW)
+    # Should be an ISO date (YYYY-MM-DD), not "Xd ago"
+    assert result.startswith("20")
+    assert len(result) == 10  # YYYY-MM-DD
+
+
+def test_format_relative_time_accepts_naive_datetime_as_utc():
+    # A naive datetime should not crash; we treat it as UTC.
+    naive = (_NOW - timedelta(minutes=10)).replace(tzinfo=None)
+    assert format_relative_time(naive, now=_NOW) == "10m ago"
