@@ -275,17 +275,27 @@ Passing an empty string (`--key ""`, `--notes ""`) stores `None` — useful when
 
 > **`--password` security note:** values passed on the command line end up in shell history (e.g. `~/.bash_history`), `/proc/<pid>/cmdline`, and process-listing tools. Prefer the interactive prompt when possible. The flag exists for provisioning scripts that source the password from a secure secret store at invocation time.
 
-The same flag set is also available on `bssh edit`, plus `--name`, `--host`, `--port`, and `--username` for in-place field updates. Only flags you pass are applied — everything else still goes through the interactive prompts, so mixing is fine:
+The same flag set is also available on `bssh edit`, plus `--name`, `--host`, `--port`, and `--username` for in-place field updates. By default, flags you pass are applied and everything else still goes through the interactive prompts, so mixing is fine:
 
 ```bash
-# Fully non-interactive
+# Apply the listed fields, interactively review the rest
 bssh edit prod --keep-alive 60 --notes "updated" -t prod -t eu
 
 # Update one field, then interactively review the rest
 bssh edit prod --host 10.0.0.9
 ```
 
-Empty-string clearing works here too: `--jump ""` drops the ProxyJump, `--notes ""` wipes the note, etc.
+Pair any flag with `-s` / `--skip` to **bypass the interactive review entirely** — only the flags you pass are applied, everything else is preserved verbatim:
+
+```bash
+# Clear just the pre-connect hook, no prompts
+bssh edit prod --no-pre -s
+
+# Update only the host, no prompts
+bssh edit prod --host 10.0.0.9 -s
+```
+
+Empty-string clearing works here too: `--jump ""` drops the ProxyJump, `--notes ""` wipes the note, etc. The dedicated `--no-pre` / `--no-post` / `--no-env` / `--no-forwards` flags do the same thing without having to quote an empty string (useful on PowerShell, where `--pre ""` gets eaten before reaching the CLI).
 
 Boolean toggles use Typer's `--x11/--no-x11` syntax on `bssh edit`: pass `--x11` to enable, `--no-x11` to disable, or omit both to keep the current value.
 
