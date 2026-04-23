@@ -518,6 +518,67 @@ def test_add_with_empty_flag_values_stores_none(
     assert added.notes is None
 
 
+def test_add_prompts_for_port_when_flag_omitted_and_stores_typed_value(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh add` without --port prompts for it via stdin and stores the typed value.
+
+    Prompts for add's required fields go through Typer's built-in prompt=True
+    (Click under the hood reads from stdin), not our patched app.cli.typer.prompt —
+    so input is fed via the CliRunner `input=` argument.
+    """
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    # --port omitted; stdin feeds "2222\n" to satisfy the port prompt
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Custom", "--host", "c.example", "--username", "u"],
+        input="2222\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    added = next(s for s in load_servers() if s.name == "Custom")
+    assert added.port == 2222
+
+
+def test_add_port_prompt_accepts_default_on_enter(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test pressing Enter at the port prompt keeps the default (22)."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Default", "--host", "d.example", "--username", "u"],
+        input="\n",  # just Enter -> accept default 22
+    )
+
+    assert result.exit_code == 0, result.output
+    added = next(s for s in load_servers() if s.name == "Default")
+    assert added.port == 22
+
+
+def test_add_rejects_port_out_of_range(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test --port outside [1, 65535] is rejected by Typer's range validation."""
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Bad", "--host", "b.example", "--username", "u", "--port", "99999"],
+    )
+
+    assert result.exit_code != 0
+    # No server should have been persisted
+    assert not any(s.name == "Bad" for s in load_servers())
+
+
 def test_export_ssh_config_command_writes_host_blocks(
     runner: CliRunner,
     temp_config_dir: Path,
