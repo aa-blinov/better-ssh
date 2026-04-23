@@ -1128,6 +1128,101 @@ def test_edit_with_jump_flag_unknown_rejected(
     assert "Jump host 'Ghost' not found" in result.stdout
 
 
+def test_add_with_pre_and_post_flags_stores_commands(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --pre / --post on add stores the shell commands verbatim."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        [
+            "add",
+            "--name",
+            "H",
+            "--host",
+            "h.example",
+            "--port",
+            "22",
+            "--username",
+            "u",
+            "--pre",
+            "openvpn-connect corp",
+            "--post",
+            "openvpn-disconnect corp",
+        ],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "H")
+    assert added.pre_connect_cmd == "openvpn-connect corp"
+    assert added.post_connect_cmd == "openvpn-disconnect corp"
+
+
+def test_edit_with_empty_pre_clears_pre_connect_command(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --pre '' on edit clears the stored pre-connect command."""
+    save_servers([Server(id="h-1", name="H", host="h.example", username="u", pre_connect_cmd="vpn up")])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "H", "--pre", ""])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "h-1")
+    assert updated.pre_connect_cmd is None
+
+
+def test_edit_with_no_post_flag_clears_post_connect_command(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --no-post on edit wipes the stored post-connect command."""
+    save_servers([Server(id="h-1", name="H", host="h.example", username="u", post_connect_cmd="vpn down")])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "H", "--no-post"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "h-1")
+    assert updated.post_connect_cmd is None
+
+
+def test_view_shows_pre_and_post_connect_rows(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test view renders Pre-connect / Post-connect rows when commands are set."""
+    save_servers(
+        [
+            Server(
+                id="h-1",
+                name="H",
+                host="h.example",
+                username="u",
+                pre_connect_cmd="aws sso login",
+                post_connect_cmd="fusermount -u /mnt/remote",
+            )
+        ]
+    )
+
+    result = runner.invoke(app, ["view", "H"])
+
+    assert result.exit_code == 0
+    assert "Pre-connect" in result.stdout
+    assert "aws sso login" in result.stdout
+    assert "Post-connect" in result.stdout
+    assert "fusermount" in result.stdout
+
+
 def test_add_with_env_flag_parses_and_stores(
     runner: CliRunner,
     temp_config_dir: Path,
@@ -2387,6 +2482,8 @@ def test_edit_no_key_shows_confirm_not_path_prompt(
         "Add tags?",
         "Configure port forwards?",
         "Set environment variables?",
+        "Add a pre-connect command?",
+        "Add a post-connect command?",
     ]
     # No key/cert path prompts — user declined via confirm
     assert not any("path" in p.lower() for p in prompt_calls)
@@ -2428,6 +2525,8 @@ def test_edit_existing_password_does_not_ask_clear_password(
         "Change tags? [prod, web]",
         "Configure port forwards?",
         "Set environment variables?",
+        "Add a pre-connect command?",
+        "Add a post-connect command?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-001")
@@ -2465,6 +2564,8 @@ def test_edit_existing_key_path_can_be_cleared(
         "Change tags? [dev]",
         "Configure port forwards?",
         "Set environment variables?",
+        "Add a pre-connect command?",
+        "Add a post-connect command?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-002")

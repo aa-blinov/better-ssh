@@ -62,6 +62,8 @@ class Server(BaseModel):
     forwards: list[Forward] = Field(default_factory=list)
     x11_forwarding: bool = False  # emit `ssh -X` when True
     environment: dict[str, str] = Field(default_factory=dict)  # SetEnv vars pushed on connect
+    pre_connect_cmd: str | None = None  # shell command run locally before each bssh connect
+    post_connect_cmd: str | None = None  # shell command run locally after ssh exits (always)
 
     def display(self) -> str:
         """Return formatted server display string."""
