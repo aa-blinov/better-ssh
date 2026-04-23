@@ -72,6 +72,23 @@ def _clipboard_failure_message(error: Exception) -> str:
     return f"{base_message} Use [cyan]better-ssh show-pass[/cyan] if needed."
 
 
+def _run_shell_hook(command: str, label: str) -> int:
+    """Run a user-provided shell command (pre/post hook).
+
+    Goes through the platform shell (sh on POSIX, cmd.exe on Windows) so the
+    user can compose pipes, redirects, and env references inline. Output is
+    inherited (progress / prompts reach the terminal live).
+    """
+    console.print(f"[cyan]{label}:[/cyan] {escape(command)}")
+    try:
+        return subprocess.call(command, shell=True)  # noqa: S602 - intentional user shell command
+    except KeyboardInterrupt:
+        return 130
+    except Exception as exc:
+        console.print(f"[red]{label} error:[/red] {escape(str(exc))}")
+        return 1
+
+
 def connect(server: Server, copy_password: bool = True, all_servers: list[Server] | None = None) -> int:
     """Connect to SSH server. Returns exit code.
 
@@ -97,6 +114,15 @@ def connect(server: Server, copy_password: bool = True, all_servers: list[Server
                 "  - Arch: [cyan]sudo pacman -S openssh[/cyan]"
             )
         return 127
+
+    # Pre-connect hook: run user-provided setup command (VPN, SSO, mount ...).
+    # If it fails, abort the connect entirely — the hook is a prerequisite.
+    # Post-connect hook is NOT run in this case since there's nothing to clean up.
+    if server.pre_connect_cmd:
+        pre_rc = _run_shell_hook(server.pre_connect_cmd, "Pre-connect")
+        if pre_rc != 0:
+            console.print(f"[red]Pre-connect hook failed (exit {pre_rc}); aborting connect.[/red]")
+            return pre_rc
 
     # Copy password to clipboard if available
     if copy_password and server.password:
@@ -159,12 +185,23 @@ def connect(server: Server, copy_password: bool = True, all_servers: list[Server
     # specs); escape before printing so Rich renders brackets literally.
     console.print(f"[cyan]SSH:[/cyan] {escape(' '.join(cmd))}")
     try:
-        return subprocess.call(cmd)  # noqa: S603
+        ssh_rc = subprocess.call(cmd)  # noqa: S603
     except KeyboardInterrupt:
-        return 130
+        ssh_rc = 130
     except Exception as e:
         console.print(f"[red]SSH execution error:[/red] {escape(str(e))}")
-        return 1
+        ssh_rc = 1
+
+    # Post-connect hook: always runs after an ssh attempt (even if ssh failed
+    # or the user Ctrl+C'd the session). This is the place for cleanup like
+    # unmounting SSHFS or disconnecting a VPN. A non-zero post exit is
+    # reported as a warning but does not override ssh's rc.
+    if server.post_connect_cmd:
+        post_rc = _run_shell_hook(server.post_connect_cmd, "Post-connect")
+        if post_rc != 0:
+            console.print(f"[yellow]Post-connect hook exited {post_rc} (ssh rc was {ssh_rc}).[/yellow]")
+
+    return ssh_rc
 
 
 def check_server_availability(server: Server, timeout: float = 3.0) -> tuple[bool, str, float]:

@@ -576,6 +576,110 @@ def test_connect_emits_all_forwards_in_order(monkeypatch):
     assert cmd[d_index + 1] == "1080"
 
 
+def test_connect_runs_pre_hook_before_ssh(monkeypatch):
+    """Test a successful pre-connect hook runs, then ssh is invoked."""
+    order: list[str] = []
+
+    def fake_call(cmd, shell=False):
+        if shell:
+            order.append(f"shell:{cmd}")
+            return 0
+        order.append(f"ssh:{cmd[0]}")
+        return 0
+
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", fake_call)
+
+    server = Server(
+        name="h",
+        host="h.example",
+        username="u",
+        pre_connect_cmd="echo before",
+    )
+    rc = connect(server, copy_password=False)
+
+    assert rc == 0
+    # Pre hook runs first (via shell), then ssh via argv
+    assert order[0].startswith("shell:echo before")
+    assert order[1] == "ssh:ssh"
+
+
+def test_connect_aborts_when_pre_hook_fails(monkeypatch):
+    """Test a non-zero pre-connect exit aborts the connect entirely."""
+    calls: list[str] = []
+
+    def fake_call(cmd, shell=False):
+        if shell:
+            calls.append(f"shell:{cmd}")
+            return 2  # pre hook fails
+        calls.append("ssh")
+        return 0
+
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", fake_call)
+
+    server = Server(
+        name="h",
+        host="h.example",
+        username="u",
+        pre_connect_cmd="failing-vpn-connect",
+        post_connect_cmd="this should NOT run",
+    )
+    rc = connect(server, copy_password=False)
+
+    assert rc == 2
+    # Only the shell hook should have been invoked; ssh and post never ran
+    assert calls == ["shell:failing-vpn-connect"]
+
+
+def test_connect_runs_post_hook_after_ssh_success(monkeypatch):
+    """Test post-connect hook runs after a successful ssh session."""
+    order: list[str] = []
+
+    def fake_call(cmd, shell=False):
+        if shell:
+            order.append(f"shell:{cmd}")
+            return 0
+        order.append("ssh")
+        return 0
+
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", fake_call)
+
+    server = Server(
+        name="h",
+        host="h.example",
+        username="u",
+        post_connect_cmd="umount /mnt",
+    )
+    rc = connect(server, copy_password=False)
+
+    assert rc == 0
+    assert order == ["ssh", "shell:umount /mnt"]
+
+
+def test_connect_runs_post_hook_even_when_ssh_fails(monkeypatch):
+    """Test post hook still runs when the ssh session exits non-zero (cleanup)."""
+    calls: list[str] = []
+
+    def fake_call(cmd, shell=False):
+        if shell:
+            calls.append(f"shell:{cmd}")
+            return 0
+        calls.append("ssh")
+        return 42  # simulate ssh failure
+
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", fake_call)
+
+    server = Server(name="h", host="h.example", username="u", post_connect_cmd="cleanup")
+    rc = connect(server, copy_password=False)
+
+    # ssh's rc is returned, not post's, but post still ran
+    assert rc == 42
+    assert calls == ["ssh", "shell:cleanup"]
+
+
 def test_connect_emits_set_env_for_each_environment_pair(monkeypatch):
     """Test server.environment yields one `-o SetEnv=K=V` per pair, in order."""
     commands: list[list[str]] = []

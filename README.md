@@ -18,6 +18,7 @@ A command-line tool for managing SSH connections with an interactive interface, 
   - [Server Notes, Tags, and Keep-Alive](#server-notes-tags-and-keep-alive)
   - [Port Forwarding](#port-forwarding)
   - [File Transfer (put / get)](#file-transfer-put--get)
+  - [Pre- and Post-Connect Hooks](#pre--and-post-connect-hooks)
   - [Environment Variables](#environment-variables)
   - [X11 Forwarding](#x11-forwarding)
   - [Parallel Command Broadcast](#parallel-command-broadcast)
@@ -48,6 +49,7 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Per-server port forwarding presets (local `-L`, remote `-R`, dynamic SOCKS `-D`)
 - Optional X11 forwarding per server (`ssh -X`)
 - Per-server environment variables pushed to the remote session (`ssh -o SetEnv`)
+- Pre- and post-connect shell hooks per server (VPN setup, cleanup, notifications)
 - File transfer (`bssh put` / `bssh get`) that reuses a server's stored profile
 - Round-trip with OpenSSH config: `bssh isc` imports Host blocks; `bssh esc` exports them back
 - Parallel command broadcast (`bssh exec`) across matched servers with per-host colored output
@@ -265,6 +267,8 @@ Flag reference:
 | `-D <spec>` | — | Dynamic SOCKS forward, repeatable: `-D [bind:]port` |
 | `--x11` | — | Enable X11 forwarding (`ssh -X`) |
 | `--env <K=V>` | `-e` | Environment variable pushed via `ssh -o SetEnv` (repeatable) |
+| `--pre <cmd>` | — | Shell command run locally BEFORE each connect (empty string clears) |
+| `--post <cmd>` | — | Shell command run locally AFTER each connect (empty string clears) |
 | `--skip` | `-s` | Skip all interactive "Add X?" confirms (provisioning / scripts) |
 
 Passing an empty string (`--key ""`, `--notes ""`) stores `None` — useful when a script wants to be explicit about clearing a field.
@@ -357,6 +361,34 @@ Notes:
 - Password authentication prompts come from OpenSSH itself; `bssh`'s clipboard copy is only wired into `bssh connect`, not put/get.
 - ProxyJump uses the server's stored `jump_host` chain, same as `connect`.
 - Requires `scp` on PATH (shipped with OpenSSH client tools). Missing binary -> exit code 127.
+
+### Pre- and Post-Connect Hooks
+
+Two optional per-server shell commands that run locally around every `bssh connect`. Typical use cases: bringing up a corporate VPN, refreshing an AWS SSO token, mounting `sshfs`, posting to Slack, or running audit logging.
+
+```bash
+# Bring a VPN up before each connect, tear it down after:
+bssh edit prod-db --pre "openvpn-connect corp" --post "openvpn-disconnect corp"
+
+# Refresh SSO credentials before each connect:
+bssh edit prod --pre "aws sso login --profile prod"
+
+# Mount a remote filesystem alongside the interactive session:
+bssh edit dev --pre "sshfs dev:/srv ~/remote-dev" --post "fusermount -u ~/remote-dev"
+
+# Clear both:
+bssh edit prod --no-pre --no-post          # explicit clear
+bssh edit prod --pre "" --post ""          # empty-string form works too
+```
+
+Semantics:
+
+- **Pre runs before ssh.** It is a prerequisite: if the hook exits non-zero, `bssh connect` aborts with the hook's exit code and does not attempt ssh. The post hook is not run in this case.
+- **Post always runs after ssh** — after a successful session, after an aborted session (Ctrl+C → rc 130), and after an auth failure. This is the place for cleanup. A non-zero post exit is reported as a yellow warning but does not override the ssh rc.
+- Commands execute through the platform shell (`sh -c` on POSIX, `cmd.exe /c` on Windows). Pipes, redirects, and environment-variable expansion all work.
+- Hooks only apply to `bssh connect` (and the interactive `bssh <query>` shortcut). `bssh exec`, `bssh put`, `bssh get` intentionally do **not** run hooks — they're non-interactive flows where running hooks per-host would be surprising.
+
+**Security note:** the commands run on your local machine with your shell and your privileges. A `servers.json` imported from an untrusted source could ship a malicious pre/post hook; audit any imported config before letting it touch your machine.
 
 ### Environment Variables
 

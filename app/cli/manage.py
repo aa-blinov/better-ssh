@@ -66,6 +66,16 @@ def add_server(
         "-e",
         help="Environment variable KEY=VALUE (repeatable; pushed via ssh -o SetEnv)",
     ),
+    pre_connect: str | None = typer.Option(
+        None,
+        "--pre",
+        help="Local shell command to run BEFORE each connect (e.g. 'aws sso login').",
+    ),
+    post_connect: str | None = typer.Option(
+        None,
+        "--post",
+        help="Local shell command to run AFTER each connect (cleanup / notifications).",
+    ),
     skip: bool = typer.Option(
         False,
         "--skip",
@@ -155,6 +165,18 @@ def add_server(
         elif not skip and typer.confirm("Set environment variables?", default=False):
             environment = _prompt_env_interactively()
 
+        pre_cmd: str | None = None
+        if pre_connect is not None:
+            pre_cmd = pre_connect or None
+        elif not skip and typer.confirm("Add a pre-connect command?", default=False):
+            pre_cmd = typer.prompt("Pre-connect shell command") or None
+
+        post_cmd: str | None = None
+        if post_connect is not None:
+            post_cmd = post_connect or None
+        elif not skip and typer.confirm("Add a post-connect command?", default=False):
+            post_cmd = typer.prompt("Post-connect shell command") or None
+
         server = Server(
             name=name,
             host=host,
@@ -170,6 +192,8 @@ def add_server(
             forwards=forwards,
             x11_forwarding=x11,
             environment=environment,
+            pre_connect_cmd=pre_cmd,
+            post_connect_cmd=post_cmd,
         )
 
         error = check_jump_cycle(existing_servers, server)
@@ -225,6 +249,10 @@ def edit(
         help="Environment KEY=VALUE (repeatable; any --env replaces the whole env dict)",
     ),
     clear_env: bool = typer.Option(False, "--no-env", help="Clear all environment variables"),
+    pre_connect: str | None = typer.Option(None, "--pre", help="Pre-connect shell command (empty string clears)"),
+    clear_pre: bool = typer.Option(False, "--no-pre", help="Clear the pre-connect command"),
+    post_connect: str | None = typer.Option(None, "--post", help="Post-connect shell command (empty string clears)"),
+    clear_post: bool = typer.Option(False, "--no-post", help="Clear the post-connect command"),
 ):
     """Edit a server."""
     if query is None:
@@ -403,6 +431,39 @@ def edit(
             elif typer.confirm("Set environment variables?", default=False):
                 environment = _prompt_env_interactively()
 
+        # Pre-connect hook
+        if clear_pre:
+            pre_cmd = None
+        elif pre_connect is not None:
+            pre_cmd = pre_connect or None
+        else:
+            pre_cmd = srv.pre_connect_cmd
+            if srv.pre_connect_cmd:
+                shown = srv.pre_connect_cmd[:50] + ("..." if len(srv.pre_connect_cmd) > 50 else "")
+                if typer.confirm(f"Change pre-connect command? [{shown}]", default=False):
+                    pre_cmd = (
+                        typer.prompt("New pre-connect command (empty to clear)", default="", show_default=False) or None
+                    )
+            elif typer.confirm("Add a pre-connect command?", default=False):
+                pre_cmd = typer.prompt("Pre-connect shell command") or None
+
+        # Post-connect hook
+        if clear_post:
+            post_cmd = None
+        elif post_connect is not None:
+            post_cmd = post_connect or None
+        else:
+            post_cmd = srv.post_connect_cmd
+            if srv.post_connect_cmd:
+                shown = srv.post_connect_cmd[:50] + ("..." if len(srv.post_connect_cmd) > 50 else "")
+                if typer.confirm(f"Change post-connect command? [{shown}]", default=False):
+                    post_cmd = (
+                        typer.prompt("New post-connect command (empty to clear)", default="", show_default=False)
+                        or None
+                    )
+            elif typer.confirm("Add a post-connect command?", default=False):
+                post_cmd = typer.prompt("Post-connect shell command") or None
+
         old_name = srv.name
         srv.name = name
         srv.host = host
@@ -417,6 +478,8 @@ def edit(
         srv.tags = tags
         srv.forwards = forwards
         srv.environment = environment
+        srv.pre_connect_cmd = pre_cmd
+        srv.post_connect_cmd = post_cmd
         if x11 is not None:
             srv.x11_forwarding = x11
 
@@ -564,6 +627,11 @@ def view(query: str | None = typer.Argument(None, help="ID/name/partial name (op
     if srv.environment:
         env_lines = "\n".join(f"{escape(k)}={escape(v)}" for k, v in srv.environment.items())
         table.add_row("Environment", f"[blue]{env_lines}[/blue]")
+
+    if srv.pre_connect_cmd:
+        table.add_row("Pre-connect", f"[cyan]{escape(srv.pre_connect_cmd)}[/cyan]")
+    if srv.post_connect_cmd:
+        table.add_row("Post-connect", f"[cyan]{escape(srv.post_connect_cmd)}[/cyan]")
 
     if srv.forwards:
         lines = "\n".join(escape(f.display()) for f in srv.forwards)
