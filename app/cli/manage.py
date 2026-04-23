@@ -134,17 +134,21 @@ def add_server(
                 all_servers=existing_servers,
             )
 
+        # Text-valued optional fields use a direct prompt with "Enter to skip"
+        # rather than a confirm-then-prompt pair. The confirm pattern is a trap
+        # for these fields: users see "Add a note?" and type the note instead
+        # of y/n, hit "Error: invalid input", and lose their typed text.
         notes: str | None = None
         if note is not None:
             notes = note or None
-        elif not skip and typer.confirm("Add a note?", default=False):
-            notes = typer.prompt("Note") or None
+        elif not skip:
+            notes = typer.prompt("Note (Enter to skip)", default="", show_default=False) or None
 
         tags: list[str] = []
         if tag is not None:
             tags = parse_tags(",".join(tag))
-        elif not skip and typer.confirm("Add tags?", default=False):
-            tags = parse_tags(typer.prompt("Comma-separated tags"))
+        elif not skip:
+            tags = parse_tags(typer.prompt("Tags (comma-separated, Enter to skip)", default="", show_default=False))
 
         keep_alive_interval: int | None = None
         if keep_alive is not None:
@@ -168,14 +172,14 @@ def add_server(
         pre_cmd: str | None = None
         if pre_connect is not None:
             pre_cmd = pre_connect or None
-        elif not skip and typer.confirm("Add a pre-connect command?", default=False):
-            pre_cmd = typer.prompt("Pre-connect shell command") or None
+        elif not skip:
+            pre_cmd = typer.prompt("Pre-connect command (Enter to skip)", default="", show_default=False) or None
 
         post_cmd: str | None = None
         if post_connect is not None:
             post_cmd = post_connect or None
-        elif not skip and typer.confirm("Add a post-connect command?", default=False):
-            post_cmd = typer.prompt("Post-connect shell command") or None
+        elif not skip:
+            post_cmd = typer.prompt("Post-connect command (Enter to skip)", default="", show_default=False) or None
 
         server = Server(
             name=name,
@@ -374,8 +378,8 @@ def edit(
                     f"Change note? [{srv.notes[:40]}{'...' if len(srv.notes) > 40 else ''}]", default=False
                 ):
                     notes = typer.prompt("New note (empty to clear)", default="", show_default=False) or None
-            elif typer.confirm("Add a note?", default=False):
-                notes = typer.prompt("Note") or None
+            else:
+                notes = typer.prompt("Note (Enter to skip)", default="", show_default=False) or None
 
         if keep_alive is not None:
             keep_alive_interval = keep_alive if keep_alive > 0 else None
@@ -396,8 +400,8 @@ def edit(
                     tags = parse_tags(
                         typer.prompt("New comma-separated tags (empty to clear)", default="", show_default=False)
                     )
-            elif typer.confirm("Add tags?", default=False):
-                tags = parse_tags(typer.prompt("Comma-separated tags"))
+            else:
+                tags = parse_tags(typer.prompt("Tags (comma-separated, Enter to skip)", default="", show_default=False))
 
         if clear_forwards:
             forwards = []
@@ -444,8 +448,8 @@ def edit(
                     pre_cmd = (
                         typer.prompt("New pre-connect command (empty to clear)", default="", show_default=False) or None
                     )
-            elif typer.confirm("Add a pre-connect command?", default=False):
-                pre_cmd = typer.prompt("Pre-connect shell command") or None
+            else:
+                pre_cmd = typer.prompt("Pre-connect command (Enter to skip)", default="", show_default=False) or None
 
         # Post-connect hook
         if clear_post:
@@ -461,8 +465,8 @@ def edit(
                         typer.prompt("New post-connect command (empty to clear)", default="", show_default=False)
                         or None
                     )
-            elif typer.confirm("Add a post-connect command?", default=False):
-                post_cmd = typer.prompt("Post-connect shell command") or None
+            else:
+                post_cmd = typer.prompt("Post-connect command (Enter to skip)", default="", show_default=False) or None
 
         old_name = srv.name
         srv.name = name
