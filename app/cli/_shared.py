@@ -21,6 +21,7 @@ from ..domain import (
     favorite_label,
     format_relative_time,
     jump_host_usage_map,
+    parse_env_spec,
     parse_forward_spec,
     sort_servers,
 )
@@ -285,6 +286,39 @@ def _prompt_forwards_interactively() -> list[Forward]:
         except ValueError as exc:
             console.print(f"[red]{escape(str(exc))}[/red]")
     return forwards
+
+
+def _parse_env_flags(specs: list[str] | None) -> dict[str, str]:
+    """Convert raw `--env KEY=VALUE` flag values into an ordered dict.
+
+    Later entries with the same key override earlier ones. Parser ValueError is
+    surfaced as a red CLI message and exit 1, matching the forward-flag helper.
+    """
+    result: dict[str, str] = {}
+    for raw in specs or []:
+        try:
+            key, value = parse_env_spec(raw)
+        except ValueError as exc:
+            console.print(f"[red]{escape(str(exc))}[/red]")
+            raise typer.Exit(1)
+        result[key] = value
+    return result
+
+
+def _prompt_env_interactively() -> dict[str, str]:
+    """Collect env-var pairs in a loop until the user submits an empty line."""
+    env: dict[str, str] = {}
+    while True:
+        raw = typer.prompt("KEY=VALUE (empty to finish)", default="", show_default=False)
+        if not raw:
+            break
+        try:
+            key, value = parse_env_spec(raw)
+        except ValueError as exc:
+            console.print(f"[red]{escape(str(exc))}[/red]")
+            continue
+        env[key] = value
+    return env
 
 
 def _merge_servers_by_name(existing_servers: list[Server], imported_servers: list[Server]) -> list[Server]:

@@ -61,6 +61,7 @@ class Server(BaseModel):
     keep_alive_interval: int | None = None  # seconds; None disables ServerAliveInterval
     forwards: list[Forward] = Field(default_factory=list)
     x11_forwarding: bool = False  # emit `ssh -X` when True
+    environment: dict[str, str] = Field(default_factory=dict)  # SetEnv vars pushed on connect
 
     def display(self) -> str:
         """Return formatted server display string."""

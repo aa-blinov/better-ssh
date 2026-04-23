@@ -13,8 +13,10 @@ from ..encryption import find_ssh_key
 from ..models import Server
 from ..ssh import JumpResolutionError, resolve_jump_chain
 from ._shared import (
+    _parse_env_flags,
     _parse_forward_flags,
     _print_no_servers_message,
+    _prompt_env_interactively,
     _prompt_forwards_interactively,
     _prompt_keep_alive_interval,
     _select_jump_host,
@@ -58,6 +60,12 @@ def add_server(
         None, "-D", help=r"Dynamic SOCKS forward, repeatable: \[bind:]port"
     ),
     x11: bool = typer.Option(False, "--x11", help="Enable X11 forwarding (ssh -X)"),
+    env: list[str] | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Environment variable KEY=VALUE (repeatable; pushed via ssh -o SetEnv)",
+    ),
     skip: bool = typer.Option(
         False,
         "--skip",
@@ -141,6 +149,12 @@ def add_server(
         else:
             forwards = []
 
+        environment: dict[str, str] = {}
+        if env is not None:
+            environment = _parse_env_flags(env)
+        elif not skip and typer.confirm("Set environment variables?", default=False):
+            environment = _prompt_env_interactively()
+
         server = Server(
             name=name,
             host=host,
@@ -155,6 +169,7 @@ def add_server(
             tags=tags,
             forwards=forwards,
             x11_forwarding=x11,
+            environment=environment,
         )
 
         error = check_jump_cycle(existing_servers, server)
@@ -203,6 +218,13 @@ def edit(
         "--x11/--no-x11",
         help="Toggle X11 forwarding (ssh -X); omit to leave the current value",
     ),
+    env: list[str] | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Environment KEY=VALUE (repeatable; any --env replaces the whole env dict)",
+    ),
+    clear_env: bool = typer.Option(False, "--no-env", help="Clear all environment variables"),
 ):
     """Edit a server."""
     if query is None:
@@ -365,6 +387,22 @@ def edit(
             elif typer.confirm("Configure port forwards?", default=False):
                 forwards = _prompt_forwards_interactively()
 
+        if clear_env:
+            environment = {}
+        elif env is not None:
+            environment = _parse_env_flags(env)
+        else:
+            environment = srv.environment
+            if srv.environment:
+                summary = ", ".join(f"{k}={v}" for k, v in srv.environment.items())
+                if typer.confirm(
+                    f"Change environment? [{summary[:60]}{'...' if len(summary) > 60 else ''}]",
+                    default=False,
+                ):
+                    environment = _prompt_env_interactively()
+            elif typer.confirm("Set environment variables?", default=False):
+                environment = _prompt_env_interactively()
+
         old_name = srv.name
         srv.name = name
         srv.host = host
@@ -378,6 +416,7 @@ def edit(
         srv.keep_alive_interval = keep_alive_interval
         srv.tags = tags
         srv.forwards = forwards
+        srv.environment = environment
         if x11 is not None:
             srv.x11_forwarding = x11
 
@@ -521,6 +560,10 @@ def view(query: str | None = typer.Argument(None, help="ID/name/partial name (op
 
     if srv.x11_forwarding:
         table.add_row("X11", "[green]enabled[/green] (ssh -X)")
+
+    if srv.environment:
+        env_lines = "\n".join(f"{escape(k)}={escape(v)}" for k, v in srv.environment.items())
+        table.add_row("Environment", f"[blue]{env_lines}[/blue]")
 
     if srv.forwards:
         lines = "\n".join(escape(f.display()) for f in srv.forwards)

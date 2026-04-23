@@ -128,6 +128,25 @@ def sort_servers(servers: list[Server]) -> list[Server]:
     return sorted(servers, key=sort_key)
 
 
+def parse_env_spec(raw: str) -> tuple[str, str]:
+    """Parse a "KEY=VALUE" env-var spec into a (key, value) tuple.
+
+    Partitions on the first `=` so values containing additional `=` survive
+    (e.g. `PS1=user@host:`). Empty values are allowed (`KEY=` yields ("KEY", "")),
+    but an empty key or a missing `=` is rejected with a user-facing ValueError.
+    """
+    raw = raw.strip()
+    if "=" not in raw:
+        raise ValueError(f"Invalid env spec '{raw}': expected KEY=VALUE")
+    key, _, value = raw.partition("=")
+    key = key.strip()
+    if not key:
+        raise ValueError(f"Invalid env spec '{raw}': empty key")
+    if any(c.isspace() for c in key):
+        raise ValueError(f"Invalid env spec '{raw}': key must not contain whitespace")
+    return key, value
+
+
 def parse_tags(raw: str) -> list[str]:
     """Parse a comma-separated tag string into a deduplicated, trimmed list."""
     seen: set[str] = set()

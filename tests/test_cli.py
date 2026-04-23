@@ -1128,6 +1128,133 @@ def test_edit_with_jump_flag_unknown_rejected(
     assert "Jump host 'Ghost' not found" in result.stdout
 
 
+def test_add_with_env_flag_parses_and_stores(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --env / -e is repeatable and stores KEY=VALUE pairs in order."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        [
+            "add",
+            "--name",
+            "E",
+            "--host",
+            "h.example",
+            "--port",
+            "22",
+            "--username",
+            "u",
+            "-e",
+            "LANG=en_US.UTF-8",
+            "-e",
+            "DEPLOY_ENV=staging",
+            "--env",
+            "PS1=user@host:",
+        ],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "E")
+    assert added.environment == {
+        "LANG": "en_US.UTF-8",
+        "DEPLOY_ENV": "staging",
+        "PS1": "user@host:",
+    }
+
+
+def test_add_with_malformed_env_spec_exits_with_error(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test an env spec missing '=' surfaces the parser's error and exits 1."""
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Bad", "--host", "h.example", "--port", "22", "--username", "u", "-e", "noequals"],
+    )
+
+    assert result.exit_code == 1
+    assert "Invalid env spec" in result.stdout
+    assert load_servers() == []
+
+
+def test_edit_with_env_flag_replaces_existing_environment(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --env on edit replaces the whole env dict, matching --tag semantics."""
+    save_servers(
+        [
+            Server(
+                id="e-1",
+                name="Srv",
+                host="h.example",
+                username="u",
+                environment={"OLD": "1", "KEEP": "me"},
+            )
+        ]
+    )
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "Srv", "-e", "NEW=value"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "e-1")
+    assert updated.environment == {"NEW": "value"}
+
+
+def test_edit_with_no_env_flag_clears_environment(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --no-env wipes the stored env dict."""
+    save_servers([Server(id="e-1", name="Srv", host="h.example", username="u", environment={"LANG": "en_US"})])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda text, *a, **kw: kw.get("default", ""))
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["edit", "Srv", "--no-env"])
+
+    assert result.exit_code == 0
+    updated = next(s for s in load_servers() if s.id == "e-1")
+    assert updated.environment == {}
+
+
+def test_view_shows_environment_section(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Test view renders each env var as a line inside the Environment row."""
+    save_servers(
+        [
+            Server(
+                id="e-1",
+                name="E",
+                host="h.example",
+                username="u",
+                environment={"LANG": "en_US.UTF-8", "DEPLOY_ENV": "prod"},
+            )
+        ]
+    )
+
+    result = runner.invoke(app, ["view", "E"])
+
+    assert result.exit_code == 0
+    assert "Environment" in result.stdout
+    assert "LANG=en_US.UTF-8" in result.stdout
+    assert "DEPLOY_ENV=prod" in result.stdout
+
+
 def test_add_with_forward_flags_parses_and_stores(
     runner: CliRunner,
     temp_config_dir: Path,
@@ -2259,6 +2386,7 @@ def test_edit_no_key_shows_confirm_not_path_prompt(
         "Enable SSH keep-alive?",
         "Add tags?",
         "Configure port forwards?",
+        "Set environment variables?",
     ]
     # No key/cert path prompts — user declined via confirm
     assert not any("path" in p.lower() for p in prompt_calls)
@@ -2299,6 +2427,7 @@ def test_edit_existing_password_does_not_ask_clear_password(
         "Enable SSH keep-alive?",
         "Change tags? [prod, web]",
         "Configure port forwards?",
+        "Set environment variables?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-001")
@@ -2335,6 +2464,7 @@ def test_edit_existing_key_path_can_be_cleared(
         "Enable SSH keep-alive?",
         "Change tags? [dev]",
         "Configure port forwards?",
+        "Set environment variables?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-002")
