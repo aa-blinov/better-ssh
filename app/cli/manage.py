@@ -58,11 +58,11 @@ def add_server(
         None, "-D", help=r"Dynamic SOCKS forward, repeatable: \[bind:]port"
     ),
     x11: bool = typer.Option(False, "--x11", help="Enable X11 forwarding (ssh -X)"),
-    yes: bool = typer.Option(
+    skip: bool = typer.Option(
         False,
-        "--yes",
-        "-y",
-        help="Non-interactive: skip all 'Add X?' confirms; fields not passed via flags stay unset.",
+        "--skip",
+        "-s",
+        help="Skip all 'Add X?' confirms (non-interactive); fields not passed via flags stay unset.",
     ),
 ):
     """Add a new server."""
@@ -82,7 +82,7 @@ def add_server(
         key_path: str | None = None
         if key is not None:
             key_path = key or None
-        elif not yes and typer.confirm("Add SSH key?", default=False):
+        elif not skip and typer.confirm("Add SSH key?", default=False):
             default_key = find_ssh_key()
             if default_key:
                 key_path = typer.prompt("Path to private key", default=str(default_key)) or None
@@ -94,7 +94,7 @@ def add_server(
         password: str | None = None
         if password_flag is not None:
             password = password_flag or None
-        elif not yes and typer.confirm("Add password?", default=False):
+        elif not skip and typer.confirm("Add password?", default=False):
             password = typer.prompt("Password", hide_input=True, confirmation_prompt=True) or None
 
         jump_host: str | None = None
@@ -107,7 +107,7 @@ def add_server(
                     console.print(f"[red]Jump host '{escape(jump)}' not found in saved servers.[/red]")
                     raise typer.Exit(1)
                 jump_host = match.name
-        elif not yes and typer.confirm("Use a jump host (ProxyJump)?", default=False):
+        elif not skip and typer.confirm("Use a jump host (ProxyJump)?", default=False):
             candidates = [s for s in existing_servers if s.name != name]
             _, jump_host = _select_jump_host(
                 candidates,
@@ -119,24 +119,24 @@ def add_server(
         notes: str | None = None
         if note is not None:
             notes = note or None
-        elif not yes and typer.confirm("Add a note?", default=False):
+        elif not skip and typer.confirm("Add a note?", default=False):
             notes = typer.prompt("Note") or None
 
         tags: list[str] = []
         if tag is not None:
             tags = parse_tags(",".join(tag))
-        elif not yes and typer.confirm("Add tags?", default=False):
+        elif not skip and typer.confirm("Add tags?", default=False):
             tags = parse_tags(typer.prompt("Comma-separated tags"))
 
         keep_alive_interval: int | None = None
         if keep_alive is not None:
             keep_alive_interval = keep_alive if keep_alive > 0 else None
-        elif not yes and typer.confirm("Enable SSH keep-alive?", default=False):
+        elif not skip and typer.confirm("Enable SSH keep-alive?", default=False):
             keep_alive_interval = _prompt_keep_alive_interval(60)
 
         if local_forward or remote_forward or dynamic_forward:
             forwards = _parse_forward_flags(local_forward, remote_forward, dynamic_forward)
-        elif not yes and typer.confirm("Configure port forwards?", default=False):
+        elif not skip and typer.confirm("Configure port forwards?", default=False):
             forwards = _prompt_forwards_interactively()
         else:
             forwards = []

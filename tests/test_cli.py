@@ -1506,12 +1506,12 @@ def test_view_shows_forwards_section(
     assert "1080" in result.stdout
 
 
-def test_add_yes_flag_skips_all_confirms(
+def test_add_skip_flag_suppresses_all_confirms(
     runner: CliRunner,
     temp_config_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Test -y on add bypasses every 'Add X?' confirm; fields default to empty/None."""
+    """Test -s on add bypasses every 'Add X?' confirm; fields default to empty/None."""
     confirm_calls: list[str] = []
     monkeypatch.setattr(
         "app.cli.typer.confirm",
@@ -1521,7 +1521,7 @@ def test_add_yes_flag_skips_all_confirms(
 
     result = runner.invoke(
         app,
-        ["add", "--name", "Minimal", "--host", "h.example", "--port", "22", "--username", "u", "-y"],
+        ["add", "--name", "Minimal", "--host", "h.example", "--port", "22", "--username", "u", "-s"],
     )
 
     assert result.exit_code == 0
@@ -1537,7 +1537,7 @@ def test_add_yes_flag_skips_all_confirms(
     assert added.forwards == []
 
 
-def test_add_yes_flag_still_honors_value_flags(
+def test_add_skip_flag_still_honors_value_flags(
     runner: CliRunner,
     temp_config_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1545,7 +1545,7 @@ def test_add_yes_flag_still_honors_value_flags(
     """Test -y doesn't disable explicit flags — flag-provided values still apply."""
 
     def fail_confirm(*a, **kw):
-        raise AssertionError("no confirm should fire under -y")
+        raise AssertionError("no confirm should fire under -s")
 
     monkeypatch.setattr("app.cli.typer.confirm", fail_confirm)
     monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
@@ -1562,7 +1562,7 @@ def test_add_yes_flag_still_honors_value_flags(
             "22",
             "--username",
             "u",
-            "-y",
+            "-s",
             "--notes",
             "provisioned",
             "-t",
@@ -1585,18 +1585,18 @@ def test_add_yes_flag_still_honors_value_flags(
     assert added.x11_forwarding is True
 
 
-def test_add_yes_long_form_is_equivalent(
+def test_add_skip_long_form_is_equivalent(
     runner: CliRunner,
     temp_config_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Test --yes long form behaves the same as -y."""
+    """Test --skip long form behaves the same as -s."""
     monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
     monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
 
     result = runner.invoke(
         app,
-        ["add", "--name", "Long", "--host", "h.example", "--port", "22", "--username", "u", "--yes"],
+        ["add", "--name", "Long", "--host", "h.example", "--port", "22", "--username", "u", "--skip"],
     )
 
     assert result.exit_code == 0
