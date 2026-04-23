@@ -1506,6 +1506,104 @@ def test_view_shows_forwards_section(
     assert "1080" in result.stdout
 
 
+def test_add_yes_flag_skips_all_confirms(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test -y on add bypasses every 'Add X?' confirm; fields default to empty/None."""
+    confirm_calls: list[str] = []
+    monkeypatch.setattr(
+        "app.cli.typer.confirm",
+        lambda text, **kw: confirm_calls.append(text) or False,
+    )
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Minimal", "--host", "h.example", "--port", "22", "--username", "u", "-y"],
+    )
+
+    assert result.exit_code == 0
+    assert confirm_calls == []  # no Add X? confirms fired
+
+    added = next(s for s in load_servers() if s.name == "Minimal")
+    assert added.key_path is None
+    assert added.password is None
+    assert added.jump_host is None
+    assert added.notes is None
+    assert added.tags == []
+    assert added.keep_alive_interval is None
+    assert added.forwards == []
+
+
+def test_add_yes_flag_still_honors_value_flags(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test -y doesn't disable explicit flags — flag-provided values still apply."""
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError("no confirm should fire under -y")
+
+    monkeypatch.setattr("app.cli.typer.confirm", fail_confirm)
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+
+    result = runner.invoke(
+        app,
+        [
+            "add",
+            "--name",
+            "WithFlags",
+            "--host",
+            "h.example",
+            "--port",
+            "22",
+            "--username",
+            "u",
+            "-y",
+            "--notes",
+            "provisioned",
+            "-t",
+            "prod",
+            "-L",
+            "5432:localhost:5432",
+            "--keep-alive",
+            "60",
+            "--x11",
+        ],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "WithFlags")
+    assert added.notes == "provisioned"
+    assert added.tags == ["prod"]
+    assert len(added.forwards) == 1
+    assert added.forwards[0].local_port == 5432
+    assert added.keep_alive_interval == 60
+    assert added.x11_forwarding is True
+
+
+def test_add_yes_long_form_is_equivalent(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --yes long form behaves the same as -y."""
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+
+    result = runner.invoke(
+        app,
+        ["add", "--name", "Long", "--host", "h.example", "--port", "22", "--username", "u", "--yes"],
+    )
+
+    assert result.exit_code == 0
+    added = next(s for s in load_servers() if s.name == "Long")
+    assert added.key_path is None
+
+
 def test_add_with_tag_flag_stores_tags(
     runner: CliRunner,
     temp_config_dir: Path,
