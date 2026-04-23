@@ -31,7 +31,7 @@ from ._shared import (
 def add_server(
     name: str | None = typer.Option(None, prompt=True, help="Server name"),
     host: str | None = typer.Option(None, prompt=True),
-    port: int = typer.Option(22, help="SSH port (default 22)"),
+    port: int = typer.Option(22, prompt=True, help="SSH port (default 22)", min=1, max=65535),
     username: str | None = typer.Option(None, prompt=True),
     jump: str | None = typer.Option(None, "--jump", "-J", help="Use this saved server as ProxyJump"),
     keep_alive: int | None = typer.Option(
