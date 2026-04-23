@@ -576,6 +576,28 @@ def test_connect_emits_all_forwards_in_order(monkeypatch):
     assert cmd[d_index + 1] == "1080"
 
 
+def test_connect_emits_set_env_for_each_environment_pair(monkeypatch):
+    """Test server.environment yields one `-o SetEnv=K=V` per pair, in order."""
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(
+        name="e",
+        host="e.example",
+        username="u",
+        environment={"LANG": "en_US.UTF-8", "DEPLOY_ENV": "prod"},
+    )
+    connect(server, copy_password=False)
+
+    cmd = commands[0]
+    assert "SetEnv=LANG=en_US.UTF-8" in cmd
+    assert "SetEnv=DEPLOY_ENV=prod" in cmd
+    # Both emitted as separate -o options
+    set_env_count = sum(1 for s in cmd if s.startswith("SetEnv="))
+    assert set_env_count == 2
+
+
 def test_connect_adds_x11_flag_when_x11_forwarding_enabled(monkeypatch):
     commands: list[list[str]] = []
     monkeypatch.setattr("app.ssh.has_ssh", lambda: True)

@@ -18,6 +18,7 @@ A command-line tool for managing SSH connections with an interactive interface, 
   - [Server Notes, Tags, and Keep-Alive](#server-notes-tags-and-keep-alive)
   - [Port Forwarding](#port-forwarding)
   - [File Transfer (put / get)](#file-transfer-put--get)
+  - [Environment Variables](#environment-variables)
   - [X11 Forwarding](#x11-forwarding)
   - [Parallel Command Broadcast](#parallel-command-broadcast)
   - [Exporting Back to SSH Config](#exporting-back-to-ssh-config)
@@ -46,6 +47,7 @@ better-ssh simplifies SSH connection management by providing an interactive term
 - Optional SSH keep-alive per server (ServerAliveInterval)
 - Per-server port forwarding presets (local `-L`, remote `-R`, dynamic SOCKS `-D`)
 - Optional X11 forwarding per server (`ssh -X`)
+- Per-server environment variables pushed to the remote session (`ssh -o SetEnv`)
 - File transfer (`bssh put` / `bssh get`) that reuses a server's stored profile
 - Round-trip with OpenSSH config: `bssh isc` imports Host blocks; `bssh esc` exports them back
 - Parallel command broadcast (`bssh exec`) across matched servers with per-host colored output
@@ -262,6 +264,7 @@ Flag reference:
 | `-R <spec>` | — | Remote forward, repeatable: `-R [bind:]port:host:port` |
 | `-D <spec>` | — | Dynamic SOCKS forward, repeatable: `-D [bind:]port` |
 | `--x11` | — | Enable X11 forwarding (`ssh -X`) |
+| `--env <K=V>` | `-e` | Environment variable pushed via `ssh -o SetEnv` (repeatable) |
 | `--skip` | `-s` | Skip all interactive "Add X?" confirms (provisioning / scripts) |
 
 Passing an empty string (`--key ""`, `--notes ""`) stores `None` — useful when a script wants to be explicit about clearing a field.
@@ -354,6 +357,28 @@ Notes:
 - Password authentication prompts come from OpenSSH itself; `bssh`'s clipboard copy is only wired into `bssh connect`, not put/get.
 - ProxyJump uses the server's stored `jump_host` chain, same as `connect`.
 - Requires `scp` on PATH (shipped with OpenSSH client tools). Missing binary -> exit code 127.
+
+### Environment Variables
+
+Per-server environment variables pushed to every `bssh connect` via OpenSSH's `SetEnv` directive. Useful for fixing `LANG` / `LC_ALL` mismatches, flagging debug mode (`DEBUG=1`), injecting project / cluster context (`DEPLOY_ENV=prod`), etc.
+
+```bash
+bssh add --name prod --host h --username u \
+  -e LANG=en_US.UTF-8 \
+  -e DEPLOY_ENV=prod \
+  -s
+
+bssh edit prod --env LANG=en_US.UTF-8  # replaces the whole env dict
+bssh edit prod --no-env                # clears all env vars
+bssh view prod                         # shows "Environment: LANG=..., DEPLOY_ENV=..."
+```
+
+Notes:
+
+- Each pair becomes a separate `-o SetEnv=KEY=VALUE` on the ssh command line.
+- `SetEnv` (OpenSSH 7.8+) pushes a literal value and does **not** require `AcceptEnv` on the remote sshd. Older servers silently drop unknown env vars.
+- Passing any `--env` to `bssh edit` **replaces** the stored dict (symmetric with `--tag`). Use `--no-env` to clear.
+- Empty values are allowed (`--env FOO=`), useful for unsetting an inherited variable pattern. Values may contain `=` (partitioned on the first `=` only).
 
 ### X11 Forwarding
 

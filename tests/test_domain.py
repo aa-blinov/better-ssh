@@ -16,6 +16,7 @@ from app.domain import (
     format_relative_time,
     jump_host_usage_map,
     name_conflict,
+    parse_env_spec,
     parse_forward_spec,
     parse_tags,
     servers_matching_query,
@@ -346,3 +347,41 @@ def test_format_relative_time_accepts_naive_datetime_as_utc():
     # A naive datetime should not crash; we treat it as UTC.
     naive = (_NOW - timedelta(minutes=10)).replace(tzinfo=None)
     assert format_relative_time(naive, now=_NOW) == "10m ago"
+
+
+# ---------------------------------------------------------------------------
+# parse_env_spec
+# ---------------------------------------------------------------------------
+
+
+def test_parse_env_spec_basic():
+    assert parse_env_spec("LANG=en_US.UTF-8") == ("LANG", "en_US.UTF-8")
+
+
+def test_parse_env_spec_empty_value_allowed():
+    assert parse_env_spec("FOO=") == ("FOO", "")
+
+
+def test_parse_env_spec_value_can_contain_equals():
+    # Partitions on the first '=' so values with extra '=' survive verbatim
+    assert parse_env_spec("PS1=user@host:") == ("PS1", "user@host:")
+    assert parse_env_spec("EQ=a=b=c") == ("EQ", "a=b=c")
+
+
+def test_parse_env_spec_trims_key_whitespace():
+    assert parse_env_spec("  LANG  =en_US") == ("LANG", "en_US")
+
+
+def test_parse_env_spec_missing_equals_rejected():
+    with pytest.raises(ValueError, match="expected KEY=VALUE"):
+        parse_env_spec("JUSTTEXT")
+
+
+def test_parse_env_spec_empty_key_rejected():
+    with pytest.raises(ValueError, match="empty key"):
+        parse_env_spec("=value")
+
+
+def test_parse_env_spec_whitespace_in_key_rejected():
+    with pytest.raises(ValueError, match="whitespace"):
+        parse_env_spec("BAD KEY=value")
