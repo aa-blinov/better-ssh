@@ -340,23 +340,28 @@ def test_list_filters_by_query_matches_tag(cli_with_servers: CliRunner):
     assert "TestServer3" not in result.stdout
 
 
-def test_add_command_confirms_note_stores_it(
+def test_add_interactive_note_prompt_stores_typed_value(
     runner: CliRunner,
     temp_config_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Test add: confirming 'Add a note?' triggers a prompt and stores the value."""
+    """Test add: typing a note at the direct 'Note (Enter to skip)' prompt stores it.
+
+    The note/tags/pre/post fields are direct prompts (no 'Add X?' confirm step)
+    so users can type the value directly without running into a y/n parser.
+    """
     prompts: list[str] = []
 
     def fake_prompt(text: str, *a, **kw):
         prompts.append(text)
-        return "main db server"
+        # Only supply a value to the note prompt; the other text prompts
+        # (tags, pre, post) get the default ("") and stay unset.
+        if text.startswith("Note"):
+            return "main db server"
+        return kw.get("default", "")
 
     monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
-    monkeypatch.setattr(
-        "app.cli.typer.confirm",
-        lambda text, **kw: text == "Add a note?",
-    )
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
 
     result = runner.invoke(
         app,
@@ -364,9 +369,13 @@ def test_add_command_confirms_note_stores_it(
     )
 
     assert result.exit_code == 0
-    assert "Note" in prompts
+    assert any(p.startswith("Note") for p in prompts)
     added = next(s for s in load_servers() if s.name == "NotedHost")
     assert added.notes == "main db server"
+    # Direct-prompt fields default to empty, so nothing else should have leaked in
+    assert added.tags == []
+    assert added.pre_connect_cmd is None
+    assert added.post_connect_cmd is None
 
 
 def test_edit_can_change_existing_note(
@@ -378,7 +387,7 @@ def test_edit_can_change_existing_note(
     save_servers([Server(id="n-1", name="Noted", host="h.example", username="u", notes="old note")])
 
     prompt_values = iter(["Noted", "h.example", 22, "u", "new note"])
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr(
         "app.cli.typer.confirm",
         lambda text, **kw: text.startswith("Change note?"),
@@ -400,7 +409,7 @@ def test_edit_can_clear_existing_note(
     save_servers([Server(id="n-1", name="Noted", host="h.example", username="u", notes="existing")])
 
     prompt_values = iter(["Noted", "h.example", 22, "u", ""])
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr(
         "app.cli.typer.confirm",
         lambda text, **kw: text.startswith("Change note?"),
@@ -418,9 +427,13 @@ def test_add_with_key_certificate_notes_flags_skip_prompts(
     temp_config_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Test --key, --certificate, --notes set fields non-interactively and skip their confirms."""
+    """Test --key, --certificate, --notes set fields non-interactively and skip their prompts."""
     confirms: list[str] = []
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: "")
+    prompts: list[str] = []
+    monkeypatch.setattr(
+        "app.cli.typer.prompt",
+        lambda text, *a, **kw: prompts.append(text) or kw.get("default", ""),
+    )
     monkeypatch.setattr(
         "app.cli.typer.confirm",
         lambda text, **kw: confirms.append(text) or False,
@@ -448,9 +461,10 @@ def test_add_with_key_certificate_notes_flags_skip_prompts(
     )
 
     assert result.exit_code == 0
-    # Flags must have short-circuited the confirms
+    # --key short-circuited the "Add SSH key?" confirm
     assert "Add SSH key?" not in confirms
-    assert "Add a note?" not in confirms
+    # --notes short-circuited the direct "Note (Enter to skip)" prompt
+    assert not any(p.startswith("Note") for p in prompts)
 
     added = next(s for s in load_servers() if s.name == "Flaggy")
     assert added.key_path == "/keys/id_ed25519"
@@ -1922,23 +1936,20 @@ def test_add_with_tag_flag_stores_tags(
     assert added.tags == ["prod", "web"]
 
 
-def test_add_tag_interactive_parses_comma_separated(
+def test_add_interactive_tags_prompt_parses_comma_separated(
     runner: CliRunner,
     temp_config_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Test interactive 'Add tags?' prompts for a comma-separated list."""
+    """Test typing comma-separated tags at the direct tags prompt parses + dedupes."""
 
     def fake_prompt(text: str, *a, **kw):
-        if text == "Comma-separated tags":
-            return "prod, db, prod"
-        return ""
+        if text.startswith("Tags"):
+            return "prod, db, prod"  # duplicate to verify dedup
+        return kw.get("default", "")
 
     monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
-    monkeypatch.setattr(
-        "app.cli.typer.confirm",
-        lambda text, **kw: text == "Add tags?",
-    )
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
 
     result = runner.invoke(
         app,
@@ -1958,8 +1969,9 @@ def test_edit_can_change_existing_tags(
     """Test edit replaces existing tags when the user provides new ones."""
     save_servers([Server(id="t-1", name="Server", host="s.example", username="u", tags=["old"])])
 
-    prompt_values = iter(["Server", "s.example", 22, "u", "prod, db"])
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    # Flow order: Name, Host, Port, Username, Note (direct prompt, skip ""), Tags change
+    prompt_values = iter(["Server", "s.example", 22, "u", "", "prod, db"])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr(
         "app.cli.typer.confirm",
         lambda text, **kw: text.startswith("Change tags?"),
@@ -1981,7 +1993,7 @@ def test_edit_can_clear_existing_tags_with_empty_input(
     save_servers([Server(id="t-1", name="Server", host="s.example", username="u", tags=["prod"])])
 
     prompt_values = iter(["Server", "s.example", 22, "u", ""])
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr(
         "app.cli.typer.confirm",
         lambda text, **kw: text.startswith("Change tags?"),
@@ -2287,9 +2299,9 @@ def test_edit_can_disable_existing_keep_alive_with_zero(
     """Test edit disables keep-alive when user enters 0 at the interval prompt."""
     save_servers([Server(id="k-1", name="Alive", host="a.example", username="u", keep_alive_interval=60)])
 
-    # Name, Host, Port, Username, then 0 for interval (disable)
-    prompt_values = iter(["Alive", "a.example", 22, "u", 0])
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    # Name, Host, Port, Username, Note (direct prompt, skip ""), then 0 for interval (disable)
+    prompt_values = iter(["Alive", "a.example", 22, "u", "", 0])
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr(
         "app.cli.typer.confirm",
         lambda text, **kw: text.startswith("Change keep-alive interval?"),
@@ -2462,10 +2474,15 @@ def test_add_command_confirms_password_prompts_with_confirmation(
     """Test add: confirming password triggers a hidden prompt with confirmation."""
     prompt_calls: list[tuple[str, dict[str, object]]] = []
 
-    monkeypatch.setattr(
-        "app.cli.typer.prompt",
-        lambda text, *a, **kw: prompt_calls.append((text, kw)) or "secret123",
-    )
+    def fake_prompt(text, *a, **kw):
+        prompt_calls.append((text, kw))
+        # Only the Password prompt gets a real value; the direct-prompt
+        # optional fields (Note/Tags/Pre/Post) get their default.
+        if text == "Password":
+            return "secret123"
+        return kw.get("default", "")
+
+    monkeypatch.setattr("app.cli.typer.prompt", fake_prompt)
     monkeypatch.setattr(
         "app.cli.typer.confirm",
         lambda text, **kw: text == "Add password?",
@@ -2477,7 +2494,11 @@ def test_add_command_confirms_password_prompts_with_confirmation(
     )
 
     assert result.exit_code == 0
-    assert prompt_calls == [("Password", {"hide_input": True, "confirmation_prompt": True})]
+    # Exactly one Password prompt, and it carried the hide_input + confirmation_prompt kwargs
+    password_prompts = [call for call in prompt_calls if call[0] == "Password"]
+    assert len(password_prompts) == 1
+    assert password_prompts[0][1]["hide_input"] is True
+    assert password_prompts[0][1]["confirmation_prompt"] is True
 
     added = load_servers()
     assert len(added) == 1
@@ -2498,7 +2519,7 @@ def test_edit_without_query_opens_interactive_selection(
     answers = iter(["RenamedServer", "example.com", 22, "user"])
 
     monkeypatch.setattr("app.cli.inquirer.select", lambda **kwargs: FakePrompt())
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *args, **kwargs: next(answers))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *args, **kwargs: next(answers, ""))
     monkeypatch.setattr("app.cli.typer.confirm", lambda *args, **kwargs: False)
 
     result = cli_with_servers.invoke(app, ["edit"])
@@ -2521,7 +2542,9 @@ def test_edit_no_key_shows_confirm_not_path_prompt(
 
     def fake_prompt(text: str, *args, **kwargs):
         prompt_calls.append(text)
-        return answers[text]
+        # Direct-prompt optional fields (Note/Tags/Pre/Post) aren't in the
+        # answers dict — return their default (empty) so they skip silently.
+        return answers.get(text, kwargs.get("default", ""))
 
     def fake_confirm(text: str, *args, **kwargs):
         confirm_calls.append(text)
@@ -2538,13 +2561,9 @@ def test_edit_no_key_shows_confirm_not_path_prompt(
         "Add certificate path?",
         "Add password?",
         "Use a jump host (ProxyJump)?",
-        "Add a note?",
         "Enable SSH keep-alive?",
-        "Add tags?",
         "Configure port forwards?",
         "Set environment variables?",
-        "Add a pre-connect command?",
-        "Add a post-connect command?",
     ]
     # No key/cert path prompts — user declined via confirm
     assert not any("path" in p.lower() for p in prompt_calls)
@@ -2562,7 +2581,7 @@ def test_edit_existing_password_does_not_ask_clear_password(
     confirm_calls: list[str] = []
 
     def fake_prompt(*args, **kwargs):
-        return next(prompt_values)
+        return next(prompt_values, "")
 
     def fake_confirm(text: str, *args, **kwargs):
         confirm_calls.append(text)
@@ -2586,8 +2605,6 @@ def test_edit_existing_password_does_not_ask_clear_password(
         "Change tags? [prod, web]",
         "Configure port forwards?",
         "Set environment variables?",
-        "Add a pre-connect command?",
-        "Add a post-connect command?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-001")
@@ -2603,7 +2620,7 @@ def test_edit_existing_key_path_can_be_cleared(
     confirm_calls: list[str] = []
 
     def fake_prompt(*args, **kwargs):
-        return next(prompt_values)
+        return next(prompt_values, "")
 
     def fake_confirm(text: str, *args, **kwargs):
         confirm_calls.append(text)
@@ -2620,13 +2637,10 @@ def test_edit_existing_key_path_can_be_cleared(
         "Add certificate path?",
         "Add password?",
         "Use a jump host (ProxyJump)?",
-        "Add a note?",
         "Enable SSH keep-alive?",
         "Change tags? [dev]",
         "Configure port forwards?",
         "Set environment variables?",
-        "Add a pre-connect command?",
-        "Add a post-connect command?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-002")
@@ -2649,7 +2663,7 @@ def test_edit_without_jump_host_offers_to_add_one(
         confirm_calls.append(text)
         return text == "Use a jump host (ProxyJump)?"
 
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr("app.cli.typer.confirm", fake_confirm)
     monkeypatch.setattr("app.cli.inquirer.select", lambda **kw: FakeJumpPrompt())
 
@@ -2685,7 +2699,7 @@ def test_none_jump_sentinel_cannot_collide_with_server_name(
             return "__none__"
 
     prompt_values = iter(["Target", "t.example", 22, "u"])
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr("app.cli.typer.confirm", lambda text, **kw: text == "Use a jump host (ProxyJump)?")
     monkeypatch.setattr("app.cli.inquirer.select", lambda **kw: PickStringNone())
 
@@ -2716,7 +2730,7 @@ def test_edit_existing_jump_host_can_be_cleared(
         def execute(self) -> str:
             return _NONE_JUMP_SENTINEL
 
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr(
         "app.cli.typer.confirm",
         lambda text, **kw: text.startswith("Change jump host?"),
@@ -2784,7 +2798,7 @@ def test_rename_cascades_to_jump_host_references(
 
     # User renames Bastion -> NewBastion, declines all other prompts
     prompt_values = iter(["NewBastion", "b.example", 22, "ops"])
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
 
     result = runner.invoke(app, ["edit", "Bastion"])
@@ -2810,7 +2824,7 @@ def test_edit_warns_when_server_used_as_jump_host(
     )
 
     prompt_values = iter(["Bastion", "b.example", 22, "ops"])
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
 
     result = runner.invoke(app, ["edit", "Bastion"])
@@ -2938,7 +2952,7 @@ def test_edit_rejects_rename_to_existing_name(
     )
 
     prompt_values = iter(["Prod"])  # rename Stage -> Prod
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
 
     result = runner.invoke(app, ["edit", "Stage"])
@@ -2960,7 +2974,7 @@ def test_edit_keeping_same_name_is_allowed(
 
     # Keep name (default), change host
     prompt_values = iter(["Prod", "new.example", 22, "u"])
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: False)
 
     result = runner.invoke(app, ["edit", "Prod"])
@@ -2989,7 +3003,7 @@ def test_edit_rejects_cycle_at_save_time(
             return "A"
 
     prompt_values = iter(["B", "b.example", 22, "u"])
-    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values))
+    monkeypatch.setattr("app.cli.typer.prompt", lambda *a, **kw: next(prompt_values, ""))
     monkeypatch.setattr("app.cli.typer.confirm", lambda text, **kw: text == "Use a jump host (ProxyJump)?")
     monkeypatch.setattr("app.cli.inquirer.select", lambda **kw: PickA())
 
