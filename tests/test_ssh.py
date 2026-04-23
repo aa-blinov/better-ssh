@@ -680,6 +680,41 @@ def test_connect_runs_post_hook_even_when_ssh_fails(monkeypatch):
     assert calls == ["ssh", "shell:cleanup"]
 
 
+def test_connect_runs_post_hook_after_jump_resolution_error(monkeypatch):
+    """Post hook must still fire if pre succeeded but jump resolution fails.
+
+    Without this, a pre-hook that mounts sshfs or brings up a VPN would leak
+    resources whenever the user has a broken jump_host reference — ssh is
+    never launched, so there is no natural place to run cleanup otherwise.
+    """
+    calls: list[str] = []
+
+    def fake_call(cmd, shell=False):
+        if shell:
+            calls.append(f"shell:{cmd}")
+            return 0
+        calls.append("ssh")
+        return 0
+
+    monkeypatch.setattr("app.ssh.has_ssh", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", fake_call)
+
+    # jump_host="ghost" has no matching server => resolve_jump_chain raises
+    target = Server(
+        name="target",
+        host="t.example",
+        username="u",
+        jump_host="ghost",
+        pre_connect_cmd="mount-sshfs",
+        post_connect_cmd="umount-sshfs",
+    )
+    rc = connect(target, copy_password=False, all_servers=[target])
+
+    assert rc == 1
+    # Pre ran, then ssh was skipped, then post still ran as cleanup
+    assert calls == ["shell:mount-sshfs", "shell:umount-sshfs"]
+
+
 def test_connect_emits_set_env_for_each_environment_pair(monkeypatch):
     """Test server.environment yields one `-o SetEnv=K=V` per pair, in order."""
     commands: list[list[str]] = []

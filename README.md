@@ -384,7 +384,7 @@ bssh edit prod --pre "" --post ""          # empty-string form works too
 Semantics:
 
 - **Pre runs before ssh.** It is a prerequisite: if the hook exits non-zero, `bssh connect` aborts with the hook's exit code and does not attempt ssh. The post hook is not run in this case.
-- **Post always runs after ssh** — after a successful session, after an aborted session (Ctrl+C → rc 130), and after an auth failure. This is the place for cleanup. A non-zero post exit is reported as a yellow warning but does not override the ssh rc.
+- **Post always runs once pre has succeeded** (or no pre was set) — after a successful ssh session, after Ctrl+C (rc 130), after an auth failure, and after an upfront config error like a broken jump-host reference where ssh was never launched. This is the place for cleanup and the "setup ran ⇒ teardown runs" contract holds even when ssh itself never starts. A non-zero post exit is reported as a yellow warning but does not override the final exit code.
 - Commands execute through the platform shell (`sh -c` on POSIX, `cmd.exe /c` on Windows). Pipes, redirects, and environment-variable expansion all work.
 - Hooks only apply to `bssh connect` (and the interactive `bssh <query>` shortcut). `bssh exec`, `bssh put`, `bssh get` intentionally do **not** run hooks — they're non-interactive flows where running hooks per-host would be surprising.
 
