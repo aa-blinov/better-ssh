@@ -169,17 +169,22 @@ def add_server(
         elif not skip and typer.confirm("Set environment variables?", default=False):
             environment = _prompt_env_interactively()
 
+        # Pre/post hooks stay confirm-then-prompt (unlike note/tags above):
+        # these are shell commands executed on every connect, so the higher
+        # stakes justify an explicit y/N opt-in. A bare "n" at a direct
+        # prompt would silently get stored as a command and fail on every
+        # connect afterward.
         pre_cmd: str | None = None
         if pre_connect is not None:
             pre_cmd = pre_connect or None
-        elif not skip:
-            pre_cmd = typer.prompt("Pre-connect command (Enter to skip)", default="", show_default=False) or None
+        elif not skip and typer.confirm("Add a pre-connect command?", default=False):
+            pre_cmd = typer.prompt("Pre-connect shell command") or None
 
         post_cmd: str | None = None
         if post_connect is not None:
             post_cmd = post_connect or None
-        elif not skip:
-            post_cmd = typer.prompt("Post-connect command (Enter to skip)", default="", show_default=False) or None
+        elif not skip and typer.confirm("Add a post-connect command?", default=False):
+            post_cmd = typer.prompt("Post-connect shell command") or None
 
         server = Server(
             name=name,
@@ -435,7 +440,9 @@ def edit(
             elif typer.confirm("Set environment variables?", default=False):
                 environment = _prompt_env_interactively()
 
-        # Pre-connect hook
+        # Pre-connect hook. Confirm-then-prompt on purpose (see add_server):
+        # shell commands deserve an explicit opt-in so a stray "n" typed at
+        # a direct prompt doesn't become a command that runs on every connect.
         if clear_pre:
             pre_cmd = None
         elif pre_connect is not None:
@@ -448,10 +455,10 @@ def edit(
                     pre_cmd = (
                         typer.prompt("New pre-connect command (empty to clear)", default="", show_default=False) or None
                     )
-            else:
-                pre_cmd = typer.prompt("Pre-connect command (Enter to skip)", default="", show_default=False) or None
+            elif typer.confirm("Add a pre-connect command?", default=False):
+                pre_cmd = typer.prompt("Pre-connect shell command") or None
 
-        # Post-connect hook
+        # Post-connect hook (same rationale as pre-connect above).
         if clear_post:
             post_cmd = None
         elif post_connect is not None:
@@ -465,8 +472,8 @@ def edit(
                         typer.prompt("New post-connect command (empty to clear)", default="", show_default=False)
                         or None
                     )
-            else:
-                post_cmd = typer.prompt("Post-connect command (Enter to skip)", default="", show_default=False) or None
+            elif typer.confirm("Add a post-connect command?", default=False):
+                post_cmd = typer.prompt("Post-connect shell command") or None
 
         old_name = srv.name
         srv.name = name

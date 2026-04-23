@@ -2564,6 +2564,8 @@ def test_edit_no_key_shows_confirm_not_path_prompt(
         "Enable SSH keep-alive?",
         "Configure port forwards?",
         "Set environment variables?",
+        "Add a pre-connect command?",
+        "Add a post-connect command?",
     ]
     # No key/cert path prompts — user declined via confirm
     assert not any("path" in p.lower() for p in prompt_calls)
@@ -2605,6 +2607,8 @@ def test_edit_existing_password_does_not_ask_clear_password(
         "Change tags? [prod, web]",
         "Configure port forwards?",
         "Set environment variables?",
+        "Add a pre-connect command?",
+        "Add a post-connect command?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-001")
@@ -2641,6 +2645,8 @@ def test_edit_existing_key_path_can_be_cleared(
         "Change tags? [dev]",
         "Configure port forwards?",
         "Set environment variables?",
+        "Add a pre-connect command?",
+        "Add a post-connect command?",
     ]
 
     updated = next(server for server in load_servers() if server.id == "test-id-002")
