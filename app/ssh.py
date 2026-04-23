@@ -124,82 +124,94 @@ def connect(server: Server, copy_password: bool = True, all_servers: list[Server
             console.print(f"[red]Pre-connect hook failed (exit {pre_rc}); aborting connect.[/red]")
             return pre_rc
 
-    # Copy password to clipboard if available
-    if copy_password and server.password:
-        try:
-            pyperclip.copy(server.password)
-            console.print(f"[green]Password copied to clipboard.[/green] When prompted for Password: {_paste_hint()}.")
-        except Exception as e:
-            console.print(_clipboard_failure_message(e))
-
-    cmd = ["ssh", "-p", str(server.port)]
-
-    # Keep-alive: emit OpenSSH ServerAliveInterval/CountMax when the user
-    # has opted in. CountMax=3 matches OpenSSH's documented default and
-    # gives ~3*interval grace before declaring the connection dead.
-    if server.keep_alive_interval and server.keep_alive_interval > 0:
-        cmd += [
-            "-o",
-            f"ServerAliveInterval={server.keep_alive_interval}",
-            "-o",
-            "ServerAliveCountMax=3",
-        ]
-
-    # Port forwards: local (-L), remote (-R), dynamic/SOCKS (-D). Render each
-    # via Forward.to_ssh_spec so bind-host handling stays in one place.
-    for fwd in server.forwards:
-        flag = {"local": "-L", "remote": "-R", "dynamic": "-D"}[fwd.type]
-        cmd += [flag, fwd.to_ssh_spec()]
-
-    # Environment variables: emit one `-o SetEnv=KEY=VALUE` per pair. SetEnv
-    # pushes a literal value to the remote session (OpenSSH 7.8+); no sshd-side
-    # AcceptEnv allowlist needed. Iteration order matches insertion (Python 3.7+
-    # dict guarantee) so the ssh command stays deterministic across runs.
-    for key, value in server.environment.items():
-        cmd += ["-o", f"SetEnv={key}={value}"]
-
-    # X11 forwarding: emit `-X` (untrusted mode — the SAFER variant) when
-    # the user opted in. Some X11 apps misbehave under the SECURITY extension
-    # and need trusted mode (`ssh -Y`) instead; users who hit that can enable
-    # it via `ForwardX11Trusted yes` in ~/.ssh/config.
-    if server.x11_forwarding:
-        cmd += ["-X"]
-
-    # ProxyJump chain
-    if server.jump_host:
-        try:
-            chain = resolve_jump_chain(server, all_servers or [])
-        except JumpResolutionError as exc:
-            console.print(f"[red]Jump host error:[/red] {escape(str(exc))}")
-            return 1
-        jump_spec = ",".join(f"{j.username}@{j.host}:{j.port}" for j in chain)
-        cmd += ["-J", jump_spec]
-
-    if server.key_path:
-        cmd += ["-i", server.key_path]
-    if server.certificate_path:
-        cmd += ["-o", f"CertificateFile={server.certificate_path}"]
-    cmd += [f"{server.username}@{server.host}"]
-
-    # `cmd` contains user-provided strings (username, host, paths, forward
-    # specs); escape before printing so Rich renders brackets literally.
-    console.print(f"[cyan]SSH:[/cyan] {escape(' '.join(cmd))}")
+    # Everything below is wrapped in try/finally: once pre has succeeded (or
+    # there was no pre), the post hook is committed to running on every exit
+    # path — including upstream config errors (broken jump host) and
+    # KeyboardInterrupt during ssh. This matches the documented cleanup
+    # contract: if setup ran, teardown runs.
+    ssh_rc: int = 1  # default if we abort before ssh actually launches
     try:
-        ssh_rc = subprocess.call(cmd)  # noqa: S603
-    except KeyboardInterrupt:
-        ssh_rc = 130
-    except Exception as e:
-        console.print(f"[red]SSH execution error:[/red] {escape(str(e))}")
-        ssh_rc = 1
+        # Copy password to clipboard if available
+        if copy_password and server.password:
+            try:
+                pyperclip.copy(server.password)
+                console.print(
+                    f"[green]Password copied to clipboard.[/green] When prompted for Password: {_paste_hint()}."
+                )
+            except Exception as e:
+                console.print(_clipboard_failure_message(e))
 
-    # Post-connect hook: always runs after an ssh attempt (even if ssh failed
-    # or the user Ctrl+C'd the session). This is the place for cleanup like
-    # unmounting SSHFS or disconnecting a VPN. A non-zero post exit is
-    # reported as a warning but does not override ssh's rc.
-    if server.post_connect_cmd:
-        post_rc = _run_shell_hook(server.post_connect_cmd, "Post-connect")
-        if post_rc != 0:
-            console.print(f"[yellow]Post-connect hook exited {post_rc} (ssh rc was {ssh_rc}).[/yellow]")
+        cmd = ["ssh", "-p", str(server.port)]
+
+        # Keep-alive: emit OpenSSH ServerAliveInterval/CountMax when the user
+        # has opted in. CountMax=3 matches OpenSSH's documented default and
+        # gives ~3*interval grace before declaring the connection dead.
+        if server.keep_alive_interval and server.keep_alive_interval > 0:
+            cmd += [
+                "-o",
+                f"ServerAliveInterval={server.keep_alive_interval}",
+                "-o",
+                "ServerAliveCountMax=3",
+            ]
+
+        # Port forwards: local (-L), remote (-R), dynamic/SOCKS (-D). Render each
+        # via Forward.to_ssh_spec so bind-host handling stays in one place.
+        for fwd in server.forwards:
+            flag = {"local": "-L", "remote": "-R", "dynamic": "-D"}[fwd.type]
+            cmd += [flag, fwd.to_ssh_spec()]
+
+        # Environment variables: emit one `-o SetEnv=KEY=VALUE` per pair. SetEnv
+        # pushes a literal value to the remote session (OpenSSH 7.8+); no sshd-side
+        # AcceptEnv allowlist needed. Iteration order matches insertion (Python 3.7+
+        # dict guarantee) so the ssh command stays deterministic across runs.
+        for key, value in server.environment.items():
+            cmd += ["-o", f"SetEnv={key}={value}"]
+
+        # X11 forwarding: emit `-X` (untrusted mode — the SAFER variant) when
+        # the user opted in. Some X11 apps misbehave under the SECURITY extension
+        # and need trusted mode (`ssh -Y`) instead; users who hit that can enable
+        # it via `ForwardX11Trusted yes` in ~/.ssh/config.
+        if server.x11_forwarding:
+            cmd += ["-X"]
+
+        # ProxyJump chain. A broken reference here is an upfront config error;
+        # we still fall through to the finally so post can clean up whatever
+        # the pre hook set up (e.g. an already-mounted sshfs).
+        if server.jump_host:
+            try:
+                chain = resolve_jump_chain(server, all_servers or [])
+            except JumpResolutionError as exc:
+                console.print(f"[red]Jump host error:[/red] {escape(str(exc))}")
+                return 1
+            jump_spec = ",".join(f"{j.username}@{j.host}:{j.port}" for j in chain)
+            cmd += ["-J", jump_spec]
+
+        if server.key_path:
+            cmd += ["-i", server.key_path]
+        if server.certificate_path:
+            cmd += ["-o", f"CertificateFile={server.certificate_path}"]
+        cmd += [f"{server.username}@{server.host}"]
+
+        # `cmd` contains user-provided strings (username, host, paths, forward
+        # specs); escape before printing so Rich renders brackets literally.
+        console.print(f"[cyan]SSH:[/cyan] {escape(' '.join(cmd))}")
+        try:
+            ssh_rc = subprocess.call(cmd)  # noqa: S603
+        except KeyboardInterrupt:
+            ssh_rc = 130
+        except Exception as e:
+            console.print(f"[red]SSH execution error:[/red] {escape(str(e))}")
+            ssh_rc = 1
+    finally:
+        # Post-connect hook: always runs once pre has succeeded — after a
+        # successful ssh session, after Ctrl+C, after auth failure, and after
+        # an upfront config error (broken jump host). The warning mentions
+        # "connect rc" rather than "ssh rc" because in the jump-error path
+        # ssh was never actually launched.
+        if server.post_connect_cmd:
+            post_rc = _run_shell_hook(server.post_connect_cmd, "Post-connect")
+            if post_rc != 0:
+                console.print(f"[yellow]Post-connect hook exited {post_rc} (connect rc: {ssh_rc}).[/yellow]")
 
     return ssh_rc
 
