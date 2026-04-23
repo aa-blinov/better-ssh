@@ -1901,6 +1901,130 @@ def test_add_skip_long_form_is_equivalent(
     assert added.key_path is None
 
 
+def test_edit_skip_flag_suppresses_all_prompts(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh edit <name> --skip` with no other flags is a no-op save — no prompts fire."""
+    save_servers(
+        [
+            Server(
+                id="s-1",
+                name="Target",
+                host="h.example",
+                username="u",
+                notes="keep me",
+                tags=["prod"],
+                pre_connect_cmd="vpn up",
+            )
+        ]
+    )
+
+    def fail_prompt(*a, **kw):
+        raise AssertionError(f"no prompt should fire under --skip, got: {a}, {kw}")
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError(f"no confirm should fire under --skip, got: {a}, {kw}")
+
+    monkeypatch.setattr("app.cli.typer.prompt", fail_prompt)
+    monkeypatch.setattr("app.cli.typer.confirm", fail_confirm)
+
+    result = runner.invoke(app, ["edit", "Target", "--skip"])
+
+    assert result.exit_code == 0, result.output
+    updated = next(s for s in load_servers() if s.id == "s-1")
+    # Every field preserved — --skip with no other flags is a no-op rewrite
+    assert updated.name == "Target"
+    assert updated.host == "h.example"
+    assert updated.notes == "keep me"
+    assert updated.tags == ["prod"]
+    assert updated.pre_connect_cmd == "vpn up"
+
+
+def test_edit_skip_with_clear_flag_clears_only_that_field(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test the common scenario: `bssh edit <name> --no-pre -s` clears pre without prompting for anything else."""
+    save_servers(
+        [
+            Server(
+                id="s-1",
+                name="Target",
+                host="h.example",
+                username="u",
+                notes="untouched",
+                tags=["kept"],
+                pre_connect_cmd="will be removed",
+                post_connect_cmd="also preserved",
+            )
+        ]
+    )
+
+    def fail_prompt(*a, **kw):
+        raise AssertionError("no prompt should fire under -s")
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError("no confirm should fire under -s")
+
+    monkeypatch.setattr("app.cli.typer.prompt", fail_prompt)
+    monkeypatch.setattr("app.cli.typer.confirm", fail_confirm)
+
+    result = runner.invoke(app, ["edit", "Target", "--no-pre", "-s"])
+
+    assert result.exit_code == 0, result.output
+    updated = next(s for s in load_servers() if s.id == "s-1")
+    # Only pre cleared; everything else preserved
+    assert updated.pre_connect_cmd is None
+    assert updated.post_connect_cmd == "also preserved"
+    assert updated.notes == "untouched"
+    assert updated.tags == ["kept"]
+
+
+def test_edit_skip_with_value_flag_applies_only_that_flag(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh edit <name> --host <new> --skip` updates just the host, preserves the rest, no prompts."""
+    save_servers(
+        [
+            Server(
+                id="s-1",
+                name="Target",
+                host="old.example",
+                port=2222,
+                username="u",
+                notes="stays",
+                tags=["k1", "k2"],
+                keep_alive_interval=60,
+            )
+        ]
+    )
+
+    def fail_prompt(*a, **kw):
+        raise AssertionError("no prompt should fire under -s")
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError("no confirm should fire under -s")
+
+    monkeypatch.setattr("app.cli.typer.prompt", fail_prompt)
+    monkeypatch.setattr("app.cli.typer.confirm", fail_confirm)
+
+    result = runner.invoke(app, ["edit", "Target", "--host", "new.example", "-s"])
+
+    assert result.exit_code == 0, result.output
+    updated = next(s for s in load_servers() if s.id == "s-1")
+    assert updated.host == "new.example"
+    # Everything else preserved verbatim
+    assert updated.port == 2222
+    assert updated.notes == "stays"
+    assert updated.tags == ["k1", "k2"]
+    assert updated.keep_alive_interval == 60
+
+
 def test_add_with_tag_flag_stores_tags(
     runner: CliRunner,
     temp_config_dir: Path,

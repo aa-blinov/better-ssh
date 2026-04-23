@@ -262,6 +262,12 @@ def edit(
     clear_pre: bool = typer.Option(False, "--no-pre", help="Clear the pre-connect command"),
     post_connect: str | None = typer.Option(None, "--post", help="Post-connect shell command (empty string clears)"),
     clear_post: bool = typer.Option(False, "--no-post", help="Clear the post-connect command"),
+    skip: bool = typer.Option(
+        False,
+        "--skip",
+        "-s",
+        help="Apply only the flags you passed; skip the interactive review for other fields.",
+    ),
 ):
     """Edit a server."""
     if query is None:
@@ -287,8 +293,11 @@ def edit(
         console.print("[dim]Renaming will update their references automatically.[/dim]")
 
     try:
+        # Basic identity fields: flag value > keep existing (if --skip) > interactive prompt
         if name_opt is not None:
             name = name_opt
+        elif skip:
+            name = srv.name
         else:
             name = typer.prompt("Name", default=srv.name)
         if name != srv.name:
@@ -300,48 +309,75 @@ def edit(
                 console.print("[dim]No changes saved.[/dim]")
                 raise typer.Exit(1)
 
-        host = host_opt if host_opt is not None else typer.prompt("Host", default=srv.host)
-        port = port_opt if port_opt is not None else typer.prompt("Port", default=srv.port, type=int)
-        username = username_opt if username_opt is not None else typer.prompt("Username", default=srv.username)
+        if host_opt is not None:
+            host = host_opt
+        elif skip:
+            host = srv.host
+        else:
+            host = typer.prompt("Host", default=srv.host)
 
+        if port_opt is not None:
+            port = port_opt
+        elif skip:
+            port = srv.port
+        else:
+            port = typer.prompt("Port", default=srv.port, type=int)
+
+        if username_opt is not None:
+            username = username_opt
+        elif skip:
+            username = srv.username
+        else:
+            username = typer.prompt("Username", default=srv.username)
+
+        # Every optional-field block below follows the same pattern:
+        #   1. If the explicit flag is set (or the --no-X clear flag), apply it.
+        #   2. Else, default to the server's current value.
+        #   3. Else (not --skip), run the interactive review — confirm then prompt.
+        # Under --skip, steps 1-2 run but step 3 is suppressed, so the only
+        # changes applied are the ones the user explicitly requested via flags.
         if key is not None:
             key_path = key or None
         else:
             key_path = srv.key_path
-            if srv.key_path:
-                if typer.confirm(f"Change key path? [{srv.key_path}]", default=False):
-                    key_path = typer.prompt("New key path (empty to clear)", default="", show_default=False) or None
-            elif typer.confirm("Add key path?", default=False):
-                key_path = typer.prompt("Key path", show_default=False) or None
+            if not skip:
+                if srv.key_path:
+                    if typer.confirm(f"Change key path? [{srv.key_path}]", default=False):
+                        key_path = typer.prompt("New key path (empty to clear)", default="", show_default=False) or None
+                elif typer.confirm("Add key path?", default=False):
+                    key_path = typer.prompt("Key path", show_default=False) or None
 
         if certificate is not None:
             certificate_path = certificate or None
         else:
             certificate_path = srv.certificate_path
-            if srv.certificate_path:
-                if typer.confirm(f"Change certificate path? [{srv.certificate_path}]", default=False):
-                    certificate_path = (
-                        typer.prompt("New certificate path (empty to clear)", default="", show_default=False) or None
-                    )
-            elif typer.confirm("Add certificate path?", default=False):
-                certificate_path = typer.prompt("Certificate path", show_default=False) or None
+            if not skip:
+                if srv.certificate_path:
+                    if typer.confirm(f"Change certificate path? [{srv.certificate_path}]", default=False):
+                        certificate_path = (
+                            typer.prompt("New certificate path (empty to clear)", default="", show_default=False)
+                            or None
+                        )
+                elif typer.confirm("Add certificate path?", default=False):
+                    certificate_path = typer.prompt("Certificate path", show_default=False) or None
 
         if password_flag is not None:
             password = password_flag or None
         else:
             password = srv.password
-            if srv.password:
-                if typer.confirm("Change password?", default=False):
-                    password = typer.prompt(
-                        "New password (empty to clear)",
-                        default="",
-                        hide_input=True,
-                        show_default=False,
-                        confirmation_prompt=True,
-                    )
-                    password = password or None
-            elif typer.confirm("Add password?", default=False):
-                password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
+            if not skip:
+                if srv.password:
+                    if typer.confirm("Change password?", default=False):
+                        password = typer.prompt(
+                            "New password (empty to clear)",
+                            default="",
+                            hide_input=True,
+                            show_default=False,
+                            confirmation_prompt=True,
+                        )
+                        password = password or None
+                elif typer.confirm("Add password?", default=False):
+                    password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
 
         if jump is not None:
             if jump == "":
@@ -355,58 +391,64 @@ def edit(
                 jump_host = match.name
         else:
             jump_host = srv.jump_host
-            if srv.jump_host:
-                if typer.confirm(f"Change jump host? [{srv.jump_host}]", default=False):
+            if not skip:
+                if srv.jump_host:
+                    if typer.confirm(f"Change jump host? [{srv.jump_host}]", default=False):
+                        candidates = [s for s in all_servers if s.name != srv.name]
+                        _, jump_host = _select_jump_host(
+                            candidates,
+                            "Select jump host:",
+                            include_none=True,
+                            current=srv.jump_host,
+                            all_servers=all_servers,
+                        )
+                elif typer.confirm("Use a jump host (ProxyJump)?", default=False):
                     candidates = [s for s in all_servers if s.name != srv.name]
                     _, jump_host = _select_jump_host(
                         candidates,
                         "Select jump host:",
-                        include_none=True,
-                        current=srv.jump_host,
+                        include_none=False,
                         all_servers=all_servers,
                     )
-            elif typer.confirm("Use a jump host (ProxyJump)?", default=False):
-                candidates = [s for s in all_servers if s.name != srv.name]
-                _, jump_host = _select_jump_host(
-                    candidates,
-                    "Select jump host:",
-                    include_none=False,
-                    all_servers=all_servers,
-                )
 
         if note is not None:
             notes = note or None
         else:
             notes = srv.notes
-            if srv.notes:
-                if typer.confirm(
-                    f"Change note? [{srv.notes[:40]}{'...' if len(srv.notes) > 40 else ''}]", default=False
-                ):
-                    notes = typer.prompt("New note (empty to clear)", default="", show_default=False) or None
-            else:
-                notes = typer.prompt("Note (Enter to skip)", default="", show_default=False) or None
+            if not skip:
+                if srv.notes:
+                    if typer.confirm(
+                        f"Change note? [{srv.notes[:40]}{'...' if len(srv.notes) > 40 else ''}]", default=False
+                    ):
+                        notes = typer.prompt("New note (empty to clear)", default="", show_default=False) or None
+                else:
+                    notes = typer.prompt("Note (Enter to skip)", default="", show_default=False) or None
 
         if keep_alive is not None:
             keep_alive_interval = keep_alive if keep_alive > 0 else None
         else:
             keep_alive_interval = srv.keep_alive_interval
-            if srv.keep_alive_interval:
-                if typer.confirm(f"Change keep-alive interval? [{srv.keep_alive_interval}s]", default=False):
-                    keep_alive_interval = _prompt_keep_alive_interval(srv.keep_alive_interval)
-            elif typer.confirm("Enable SSH keep-alive?", default=False):
-                keep_alive_interval = _prompt_keep_alive_interval(60)
+            if not skip:
+                if srv.keep_alive_interval:
+                    if typer.confirm(f"Change keep-alive interval? [{srv.keep_alive_interval}s]", default=False):
+                        keep_alive_interval = _prompt_keep_alive_interval(srv.keep_alive_interval)
+                elif typer.confirm("Enable SSH keep-alive?", default=False):
+                    keep_alive_interval = _prompt_keep_alive_interval(60)
 
         if tag is not None:
             tags = parse_tags(",".join(tag))
         else:
             tags = srv.tags
-            if srv.tags:
-                if typer.confirm(f"Change tags? [{', '.join(srv.tags)}]", default=False):
+            if not skip:
+                if srv.tags:
+                    if typer.confirm(f"Change tags? [{', '.join(srv.tags)}]", default=False):
+                        tags = parse_tags(
+                            typer.prompt("New comma-separated tags (empty to clear)", default="", show_default=False)
+                        )
+                else:
                     tags = parse_tags(
-                        typer.prompt("New comma-separated tags (empty to clear)", default="", show_default=False)
+                        typer.prompt("Tags (comma-separated, Enter to skip)", default="", show_default=False)
                     )
-            else:
-                tags = parse_tags(typer.prompt("Tags (comma-separated, Enter to skip)", default="", show_default=False))
 
         if clear_forwards:
             forwards = []
@@ -414,15 +456,16 @@ def edit(
             forwards = _parse_forward_flags(local_forward, remote_forward, dynamic_forward)
         else:
             forwards = srv.forwards
-            if srv.forwards:
-                summary = ", ".join(f.display() for f in srv.forwards)
-                if typer.confirm(
-                    f"Change port forwards? [{summary[:60]}{'...' if len(summary) > 60 else ''}]",
-                    default=False,
-                ):
+            if not skip:
+                if srv.forwards:
+                    summary = ", ".join(f.display() for f in srv.forwards)
+                    if typer.confirm(
+                        f"Change port forwards? [{summary[:60]}{'...' if len(summary) > 60 else ''}]",
+                        default=False,
+                    ):
+                        forwards = _prompt_forwards_interactively()
+                elif typer.confirm("Configure port forwards?", default=False):
                     forwards = _prompt_forwards_interactively()
-            elif typer.confirm("Configure port forwards?", default=False):
-                forwards = _prompt_forwards_interactively()
 
         if clear_env:
             environment = {}
@@ -430,15 +473,16 @@ def edit(
             environment = _parse_env_flags(env)
         else:
             environment = srv.environment
-            if srv.environment:
-                summary = ", ".join(f"{k}={v}" for k, v in srv.environment.items())
-                if typer.confirm(
-                    f"Change environment? [{summary[:60]}{'...' if len(summary) > 60 else ''}]",
-                    default=False,
-                ):
+            if not skip:
+                if srv.environment:
+                    summary = ", ".join(f"{k}={v}" for k, v in srv.environment.items())
+                    if typer.confirm(
+                        f"Change environment? [{summary[:60]}{'...' if len(summary) > 60 else ''}]",
+                        default=False,
+                    ):
+                        environment = _prompt_env_interactively()
+                elif typer.confirm("Set environment variables?", default=False):
                     environment = _prompt_env_interactively()
-            elif typer.confirm("Set environment variables?", default=False):
-                environment = _prompt_env_interactively()
 
         # Pre-connect hook. Confirm-then-prompt on purpose (see add_server):
         # shell commands deserve an explicit opt-in so a stray "n" typed at
@@ -449,14 +493,16 @@ def edit(
             pre_cmd = pre_connect or None
         else:
             pre_cmd = srv.pre_connect_cmd
-            if srv.pre_connect_cmd:
-                shown = srv.pre_connect_cmd[:50] + ("..." if len(srv.pre_connect_cmd) > 50 else "")
-                if typer.confirm(f"Change pre-connect command? [{shown}]", default=False):
-                    pre_cmd = (
-                        typer.prompt("New pre-connect command (empty to clear)", default="", show_default=False) or None
-                    )
-            elif typer.confirm("Add a pre-connect command?", default=False):
-                pre_cmd = typer.prompt("Pre-connect shell command") or None
+            if not skip:
+                if srv.pre_connect_cmd:
+                    shown = srv.pre_connect_cmd[:50] + ("..." if len(srv.pre_connect_cmd) > 50 else "")
+                    if typer.confirm(f"Change pre-connect command? [{shown}]", default=False):
+                        pre_cmd = (
+                            typer.prompt("New pre-connect command (empty to clear)", default="", show_default=False)
+                            or None
+                        )
+                elif typer.confirm("Add a pre-connect command?", default=False):
+                    pre_cmd = typer.prompt("Pre-connect shell command") or None
 
         # Post-connect hook (same rationale as pre-connect above).
         if clear_post:
@@ -465,15 +511,16 @@ def edit(
             post_cmd = post_connect or None
         else:
             post_cmd = srv.post_connect_cmd
-            if srv.post_connect_cmd:
-                shown = srv.post_connect_cmd[:50] + ("..." if len(srv.post_connect_cmd) > 50 else "")
-                if typer.confirm(f"Change post-connect command? [{shown}]", default=False):
-                    post_cmd = (
-                        typer.prompt("New post-connect command (empty to clear)", default="", show_default=False)
-                        or None
-                    )
-            elif typer.confirm("Add a post-connect command?", default=False):
-                post_cmd = typer.prompt("Post-connect shell command") or None
+            if not skip:
+                if srv.post_connect_cmd:
+                    shown = srv.post_connect_cmd[:50] + ("..." if len(srv.post_connect_cmd) > 50 else "")
+                    if typer.confirm(f"Change post-connect command? [{shown}]", default=False):
+                        post_cmd = (
+                            typer.prompt("New post-connect command (empty to clear)", default="", show_default=False)
+                            or None
+                        )
+                elif typer.confirm("Add a post-connect command?", default=False):
+                    post_cmd = typer.prompt("Post-connect shell command") or None
 
         old_name = srv.name
         srv.name = name
