@@ -224,11 +224,11 @@ When nothing matches, the command prints a single friendly line instead of an em
 
 ### Adding Servers Non-Interactively
 
-Every field `bssh add` prompts for has an equivalent flag, so the full flow can be scripted. Pair with `-y` / `--yes` to suppress the "Add SSH key?", "Add password?", "Use a jump host?" etc. confirms — any field not passed via flag stays unset.
+Every field `bssh add` prompts for has an equivalent flag, so the full flow can be scripted. Pair with `-s` / `--skip` to suppress the "Add SSH key?", "Add password?", "Use a jump host?" etc. confirms — any field not passed via flag stays unset.
 
 ```bash
 # Minimal non-interactive add:
-bssh add --name prod-db --host 10.0.0.5 --username deploy -y
+bssh add --name prod-db --host 10.0.0.5 --username deploy -s
 
 # With the full profile populated via flags:
 bssh add \
@@ -242,10 +242,10 @@ bssh add \
   --keep-alive 60 \
   --notes "main postgres" \
   -t prod -t db \
-  -y
+  -s
 ```
 
-Without `-y`, `bssh add` drops into the interactive confirm sequence for any field you didn't pre-populate, which is friendly for humans but inconvenient for Ansible/Terraform-style runs.
+Without `-s`, `bssh add` drops into the interactive confirm sequence for any field you didn't pre-populate, which is friendly for humans but inconvenient for Ansible/Terraform-style runs.
 
 Flag reference:
 
@@ -262,7 +262,7 @@ Flag reference:
 | `-R <spec>` | — | Remote forward, repeatable: `-R [bind:]port:host:port` |
 | `-D <spec>` | — | Dynamic SOCKS forward, repeatable: `-D [bind:]port` |
 | `--x11` | — | Enable X11 forwarding (`ssh -X`) |
-| `--yes` | `-y` | Skip all interactive "Add X?" confirms (provisioning / scripts) |
+| `--skip` | `-s` | Skip all interactive "Add X?" confirms (provisioning / scripts) |
 
 Passing an empty string (`--key ""`, `--notes ""`) stores `None` — useful when a script wants to be explicit about clearing a field.
 
