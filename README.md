@@ -598,9 +598,13 @@ By default, passwords are stored in plaintext. The application offers optional e
 ### Managing Encryption
 
 ```bash
-bssh es    # check encryption status
-bssh enc   # enable encryption (interactive)
-bssh dec   # disable encryption (interactive)
+bssh es            # check encryption status
+bssh enc           # enable encryption (interactive)
+bssh dec           # disable encryption (interactive)
+
+# For scripts / CI — skip the "are you sure?" prompt:
+bssh enc -y
+bssh dec -y
 ```
 
 When exporting servers, you can choose to export passwords in plaintext or encrypted format through an interactive prompt.

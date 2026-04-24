@@ -882,6 +882,57 @@ def test_decrypt_command_already_disabled_is_idempotent(
     assert "already disabled" in result.stdout.lower()
 
 
+def test_encrypt_yes_flag_skips_confirmation(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test `bssh encrypt --yes` proceeds without calling typer.confirm (scripting)."""
+    save_servers([Server(id="s-1", name="S", host="h.example", username="u", password="plain")])
+
+    fake_key = tmp_path / "id_ed25519"
+    fake_key.write_bytes(b"fake key material")
+    monkeypatch.setattr("app.cli.crypto.find_ssh_key_for_encryption", lambda: fake_key)
+    monkeypatch.setattr("app.encryption.find_ssh_key_for_encryption", lambda: fake_key)
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError("--yes must bypass the confirmation prompt")
+
+    monkeypatch.setattr("app.cli.typer.confirm", fail_confirm)
+
+    result = runner.invoke(app, ["encrypt", "--yes"])
+
+    assert result.exit_code == 0
+    assert "Encryption enabled" in result.stdout
+    assert is_encryption_enabled() is True
+
+
+def test_decrypt_yes_flag_skips_confirmation(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test `bssh decrypt -y` proceeds without calling typer.confirm (scripting)."""
+    fake_key = tmp_path / "id_ed25519"
+    fake_key.write_bytes(b"fake key material")
+    monkeypatch.setattr("app.encryption.find_ssh_key_for_encryption", lambda: fake_key)
+    save_settings({"encryption_enabled": True})
+    save_servers([Server(id="s-1", name="S", host="h.example", username="u", password="secret")])
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError("-y must bypass the confirmation prompt")
+
+    monkeypatch.setattr("app.cli.typer.confirm", fail_confirm)
+
+    result = runner.invoke(app, ["decrypt", "-y"])
+
+    assert result.exit_code == 0
+    assert "Encryption disabled" in result.stdout
+    assert is_encryption_enabled() is False
+
+
 def test_encryption_status_reports_state(
     runner: CliRunner,
     temp_config_dir: Path,

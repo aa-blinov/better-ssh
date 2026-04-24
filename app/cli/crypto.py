@@ -15,7 +15,14 @@ from ._shared import app, console
 
 @app.command("encrypt", help="Enable password encryption. Alias: enc")
 @app.command("enc", hidden=True)
-def enable_encryption():
+def enable_encryption(
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Auto-confirm the safety prompt (for scripts / CI).",
+    ),
+):
     """Enable password encryption (SSH key based)."""
     if storage.is_encryption_enabled():
         console.print("[yellow]Encryption is already enabled.[/yellow]")
@@ -49,14 +56,17 @@ def enable_encryption():
 
     console.print(Panel(disclaimer, title="Password Encryption", border_style="yellow"))
 
-    try:
-        console.print("\n[bold yellow]Do you understand the risks and want to enable encryption?[/bold yellow]")
-        if not typer.confirm("Continue?", default=False):
-            console.print("[dim]Cancelled.[/dim]")
+    # Keep the disclaimer panel visible even under --yes (informational, low
+    # cost); only the interactive confirm is skipped so scripts/CI can run.
+    if not yes:
+        try:
+            console.print("\n[bold yellow]Do you understand the risks and want to enable encryption?[/bold yellow]")
+            if not typer.confirm("Continue?", default=False):
+                console.print("[dim]Cancelled.[/dim]")
+                raise typer.Exit(0)
+        except (KeyboardInterrupt, typer.Abort):
+            console.print("\n[dim]Cancelled.[/dim]")
             raise typer.Exit(0)
-    except (KeyboardInterrupt, typer.Abort):
-        console.print("\n[dim]Cancelled.[/dim]")
-        raise typer.Exit(0)
 
     # Load servers BEFORE enabling encryption so we get the raw state.
     # If passwords are stuck (encrypted but encryption is disabled), try to
@@ -94,7 +104,14 @@ def enable_encryption():
 
 @app.command("decrypt", help="Disable password encryption. Alias: dec")
 @app.command("dec", hidden=True)
-def disable_encryption():
+def disable_encryption(
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Auto-confirm the safety prompt (for scripts / CI).",
+    ),
+):
     """Disable password encryption (decrypt all passwords)."""
     if not storage.is_encryption_enabled():
         console.print("[yellow]Encryption is already disabled.[/yellow]")
@@ -112,14 +129,15 @@ to anyone with access to your computer.
 
     console.print(Panel(warning, title="Warning", border_style="red"))
 
-    try:
-        console.print("\n[bold red]Are you sure you want to disable encryption?[/bold red]")
-        if not typer.confirm("Continue?", default=False):
-            console.print("[dim]Cancelled.[/dim]")
+    if not yes:
+        try:
+            console.print("\n[bold red]Are you sure you want to disable encryption?[/bold red]")
+            if not typer.confirm("Continue?", default=False):
+                console.print("[dim]Cancelled.[/dim]")
+                raise typer.Exit(0)
+        except (KeyboardInterrupt, typer.Abort):
+            console.print("\n[dim]Cancelled.[/dim]")
             raise typer.Exit(0)
-    except (KeyboardInterrupt, typer.Abort):
-        console.print("\n[dim]Cancelled.[/dim]")
-        raise typer.Exit(0)
 
     # Load servers (auto-decrypts with current salt).
     # Any passwords that still look encrypted after load are irrecoverable —
