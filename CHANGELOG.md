@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`bssh sftp <query>`** — interactive SFTP session against a saved server.
+  Drops you into the `sftp>` prompt with the server's full profile applied
+  (port, key, cert, jump chain, keep-alive) and honors pre/post-connect hooks
+  the same way `bssh connect` does. Fills the gap between `bssh put`/`get`
+  (one-shot, known path) and raw `sftp user@host -P port -i key -J jump`
+  (retype everything). `--copy/--no-copy` flag mirrors `bssh connect`.
+
+
 ## [0.2.0] — 2026-04-24
 
 First tagged release (Beta). `0.1.0` was the initial scaffold and was

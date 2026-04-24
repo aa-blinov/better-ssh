@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from app.cli import app
 from app.models import Server
-from app.storage import save_servers
+from app.storage import load_servers, save_servers
 
 
 def _patch_scp_capture(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
@@ -256,3 +256,95 @@ def test_put_with_no_servers_shows_empty_state(
 
     assert result.exit_code == 1
     assert "No servers saved" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# sftp interactive session
+# ---------------------------------------------------------------------------
+
+
+def test_sftp_command_routes_to_session(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """`bssh sftp <name>` finds the server and invokes sftp_session with its profile."""
+    save_servers([Server(id="s-1", name="prod", host="p.example", username="deploy", port=2222)])
+
+    captured: list[tuple[Server, bool]] = []
+
+    def fake_session(server, copy_password=True, all_servers=None):
+        captured.append((server, copy_password))
+        return 0
+
+    monkeypatch.setattr("app.cli.transfer.sftp_session", fake_session)
+
+    result = runner.invoke(app, ["sftp", "prod"])
+
+    assert result.exit_code == 0
+    assert len(captured) == 1
+    srv, copy = captured[0]
+    assert srv.name == "prod"
+    assert srv.port == 2222
+    assert copy is True  # default
+
+
+def test_sftp_command_no_copy_flag_disables_clipboard(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """`--no-copy` disables the password clipboard push, matching `bssh connect`."""
+    save_servers([Server(id="s-1", name="prod", host="p.example", username="deploy")])
+
+    captured: list[bool] = []
+
+    def fake_session(server, copy_password=True, all_servers=None):
+        captured.append(copy_password)
+        return 0
+
+    monkeypatch.setattr("app.cli.transfer.sftp_session", fake_session)
+
+    result = runner.invoke(app, ["sftp", "prod", "--no-copy"])
+
+    assert result.exit_code == 0
+    assert captured == [False]
+
+
+def test_sftp_command_with_unknown_query_exits_1(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """Unresolvable query fails with rc=1 and a clear message (no silent picker)."""
+    save_servers([Server(id="s-1", name="prod", host="p.example", username="deploy")])
+
+    result = runner.invoke(app, ["sftp", "ghost"])
+
+    assert result.exit_code == 1
+    assert "No server matches" in result.stdout
+
+
+def test_sftp_command_empty_servers_exits_1(
+    runner: CliRunner,
+    temp_config_dir: Path,
+):
+    """No saved servers -> empty-state hint + rc=1."""
+    result = runner.invoke(app, ["sftp", "anything"])
+
+    assert result.exit_code == 1
+    assert "No servers" in result.stdout
+
+
+def test_sftp_command_records_server_use_on_success(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Successful sftp session bumps use_count, same as bssh connect."""
+    save_servers([Server(id="s-1", name="prod", host="p.example", username="deploy")])
+    monkeypatch.setattr("app.cli.transfer.sftp_session", lambda server, **kw: 0)
+
+    runner.invoke(app, ["sftp", "prod"])
+
+    updated = next(s for s in load_servers() if s.id == "s-1")
+    assert updated.use_count == 1

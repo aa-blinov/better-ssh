@@ -51,6 +51,11 @@ def has_ssh() -> bool:
     return shutil.which("ssh") is not None
 
 
+def has_sftp() -> bool:
+    """Check if the SFTP client is available (shipped with OpenSSH)."""
+    return shutil.which("sftp") is not None
+
+
 def _paste_hint() -> str:
     """Return a platform-appropriate paste hint for terminal prompts."""
     system = platform.system()
@@ -214,6 +219,97 @@ def connect(server: Server, copy_password: bool = True, all_servers: list[Server
                 console.print(f"[yellow]Post-connect hook exited {post_rc} (connect rc: {ssh_rc}).[/yellow]")
 
     return ssh_rc
+
+
+def sftp_session(
+    server: Server,
+    copy_password: bool = True,
+    all_servers: list[Server] | None = None,
+) -> int:
+    """Drop the user into an interactive SFTP session against `server`.
+
+    Mirrors `connect()`'s envelope — pre-hook, password clipboard, jump-chain
+    resolution, post-hook — around an ``sftp`` invocation instead of ``ssh``.
+    Differences vs connect:
+
+    - Launches the ``sftp`` binary (still part of OpenSSH; modern ``scp`` uses
+      the same protocol under the hood).
+    - Uses ``-P port`` (uppercase) per sftp(1) conventions; ssh uses ``-p``.
+    - Port forwards, X11, and SetEnv env vars are intentionally not emitted —
+      they are connection-oriented features that do not apply to an interactive
+      file-transfer session.
+
+    Pre/post hooks run here for the same reason they run for ``connect``: this
+    is an interactive flow, and any VPN / SSHFS / SSO setup the user wants
+    around a shell session is typically relevant for file browsing too.
+    """
+    if not has_sftp():
+        console.print("[red]SFTP client not found.[/red]")
+        console.print("[dim]SFTP ships with OpenSSH; install the OpenSSH client package for your OS.[/dim]")
+        return 127
+
+    if server.pre_connect_cmd:
+        pre_rc = _run_shell_hook(server.pre_connect_cmd, "Pre-connect")
+        if pre_rc != 0:
+            console.print(f"[red]Pre-connect hook failed (exit {pre_rc}); aborting sftp.[/red]")
+            return pre_rc
+
+    # try/finally mirrors connect(): once pre succeeded, post is guaranteed
+    # on every exit path below — including upstream config errors and Ctrl+C.
+    sftp_rc: int = 1
+    try:
+        if copy_password and server.password:
+            try:
+                pyperclip.copy(server.password)
+                console.print(
+                    f"[green]Password copied to clipboard.[/green] When prompted for Password: {_paste_hint()}."
+                )
+            except Exception as e:
+                console.print(_clipboard_failure_message(e))
+
+        cmd: list[str] = ["sftp", "-P", str(server.port)]
+
+        if server.keep_alive_interval and server.keep_alive_interval > 0:
+            cmd += [
+                "-o",
+                f"ServerAliveInterval={server.keep_alive_interval}",
+                "-o",
+                "ServerAliveCountMax=3",
+            ]
+
+        if server.jump_host:
+            try:
+                chain = resolve_jump_chain(server, all_servers or [])
+            except JumpResolutionError as exc:
+                console.print(f"[red]Jump host error:[/red] {escape(str(exc))}")
+                return 1
+            jump_spec = ",".join(f"{j.username}@{j.host}:{j.port}" for j in chain)
+            cmd += ["-J", jump_spec]
+
+        if server.key_path:
+            cmd += ["-i", server.key_path]
+        if server.certificate_path:
+            cmd += ["-o", f"CertificateFile={server.certificate_path}"]
+        cmd += [f"{server.username}@{server.host}"]
+
+        console.print(f"[cyan]SFTP:[/cyan] {escape(' '.join(cmd))}")
+        console.print(
+            "[dim]Interactive session — type [cyan]help[/cyan] for commands, [cyan]bye[/cyan] or Ctrl+D to exit.[/dim]"
+        )
+        try:
+            sftp_rc = subprocess.call(cmd)  # noqa: S603
+        except KeyboardInterrupt:
+            sftp_rc = 130
+        except Exception as e:
+            console.print(f"[red]SFTP execution error:[/red] {escape(str(e))}")
+            sftp_rc = 1
+    finally:
+        if server.post_connect_cmd:
+            post_rc = _run_shell_hook(server.post_connect_cmd, "Post-connect")
+            if post_rc != 0:
+                console.print(f"[yellow]Post-connect hook exited {post_rc} (session rc: {sftp_rc}).[/yellow]")
+
+    return sftp_rc
 
 
 def check_server_availability(server: Server, timeout: float = 3.0) -> tuple[bool, str, float]:

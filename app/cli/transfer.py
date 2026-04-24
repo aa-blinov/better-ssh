@@ -15,9 +15,10 @@ import typer
 from rich.markup import escape
 
 from .. import storage
+from ..domain import servers_matching_query
 from ..models import Server
-from ..ssh import JumpResolutionError, resolve_jump_chain
-from ._shared import app, console
+from ..ssh import JumpResolutionError, resolve_jump_chain, sftp_session
+from ._shared import _print_no_servers_message, _select_server, app, console
 
 
 def has_scp() -> bool:
@@ -124,6 +125,60 @@ def put_cmd(
         raise typer.Exit(1)
 
     raise typer.Exit(_run_scp(cmd))
+
+
+@app.command(
+    "sftp",
+    help=(
+        "Open an interactive SFTP session to a saved server.\n\n"
+        "Unlike `bssh put` / `bssh get` (one-shot transfers), this drops you "
+        "into the sftp prompt so you can browse, upload, and download without "
+        "knowing exact paths in advance. Uses the server's stored profile — "
+        "port, key, certificate, jump chain, keep-alive — plus any pre/post "
+        "hooks configured for that server."
+    ),
+)
+def sftp_cmd(
+    query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
+    copy: bool = typer.Option(
+        True,
+        "--copy/--no-copy",
+        help="Copy the server's password to clipboard before launching sftp (disable with --no-copy).",
+    ),
+):
+    """Drop into an interactive SFTP session against a saved server.
+
+    Usage pattern when you don't know the exact remote path:
+
+        bssh sftp prod-db
+        sftp> cd /var/log
+        sftp> ls
+        sftp> get app.log
+        sftp> bye
+    """
+    servers = storage.load_servers()
+    if not servers:
+        _print_no_servers_message()
+        raise typer.Exit(1)
+
+    if query is None:
+        srv = _select_server(servers, "Select server for SFTP:")
+    else:
+        srv = storage.find_server(query, servers)
+        if not srv:
+            matching = servers_matching_query(servers, query)
+            if matching:
+                srv = _select_server(matching, f"Select server for SFTP for '{query}':")
+            else:
+                console.print(f"[red]No server matches '{escape(query)}'.[/red]")
+                raise typer.Exit(1)
+
+    rc = sftp_session(srv, copy_password=copy, all_servers=servers)
+    # Count an interactive sftp session as a connection for recency tracking,
+    # same as bssh connect — the user touched the host from bssh.
+    if rc in (0, 130):
+        storage.record_server_use(srv.id)
+    raise typer.Exit(rc)
 
 
 @app.command("get", help="Download a remote file or directory from a saved server.")
