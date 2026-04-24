@@ -6,8 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] — 2026-04-24
 
-First tagged release. `0.1.0` was the initial scaffold and was never
-published; this release is the point where the CLI surface stabilizes.
+First tagged release (Beta). `0.1.0` was the initial scaffold and was
+never published; this release is the point where the CLI surface
+stabilizes. Requires **Python 3.12+** and an OpenSSH client.
+
+### Installation
+
+```bash
+# Recommended: install as a uv tool (isolated environment)
+uv tool install https://github.com/aa-blinov/better-ssh/releases/download/v0.2.0/better_ssh-0.2.0-py3-none-any.whl
+
+# Or via pip (into the current environment):
+pip install https://github.com/aa-blinov/better-ssh/releases/download/v0.2.0/better_ssh-0.2.0-py3-none-any.whl
+
+# Or from source at this tag:
+uv tool install git+https://github.com/aa-blinov/better-ssh.git@v0.2.0
+```
+
+Both `bssh` and `better-ssh` are registered as entry points and behave
+identically. Verify with `bssh --help`.
 
 ### Core commands
 
@@ -74,8 +91,8 @@ published; this release is the point where the CLI surface stabilizes.
 
 - `bssh exec` runs commands across matched servers concurrently with
   per-host colored output and an aggregated summary
-- `bssh health` probes all servers in parallel (was serial — O(N × timeout)
-  worst case, now O(timeout))
+- `bssh health` probes all servers in parallel — wall time is
+  `~max(timeout, slowest_host)` instead of `N × timeout`
 
 ### Cross-platform
 
@@ -83,7 +100,26 @@ published; this release is the point where the CLI surface stabilizes.
 - Platform-specific paste hints, clipboard fallback messages,
   SSH-client-missing install instructions
 
+### Known limitations
+
+- **`bssh` does not forward bastion auth through `ssh -J`.** Only
+  `user@host:port` is passed for each hop; OpenSSH resolves bastion
+  credentials through its own mechanisms (`~/.ssh/config`, ssh-agent,
+  default keys). A `key_path` or `password` stored on the bastion entry
+  in `bssh` is not used during a jump connection.
+- **Password clipboard covers only the target server**, not the bastion.
+  Users are prompted for the bastion password separately.
+- **Multi-hop `ProxyJump h1,h2` and inline `user@host:port`** specs in
+  `~/.ssh/config` are skipped on `bssh isc`. Only single-hop alias
+  references to other imported hosts are preserved; multi-hop chains
+  must be rebuilt manually via per-hop `jump_host` references.
+- **`bssh exec` and `bssh put`/`get` use `-o BatchMode=yes`** to avoid
+  interleaved password prompts in parallel runs. Password-only servers
+  fail fast — use key/cert auth or ssh-agent for these commands.
+
 ### Testing
 
-- 382 tests, ~85% branch coverage
-- GitHub Actions CI with Codecov integration
+- Extensive test suite (~85% branch coverage), GitHub Actions CI,
+  Codecov integration.
+
+[0.2.0]: https://github.com/aa-blinov/better-ssh/releases/tag/v0.2.0
