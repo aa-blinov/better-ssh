@@ -46,18 +46,22 @@ def add_server(
     password_flag: str | None = typer.Option(
         None,
         "--password",
-        help="Password (WARNING: visible in shell history; prefer interactive prompt)",
+        help=(
+            "Password. WARNING: values passed on the command line end up in shell history "
+            "and /proc/<pid>/cmdline; prefer the interactive prompt or source the value "
+            "from a secret store at invocation time."
+        ),
     ),
     note: str | None = typer.Option(None, "--notes", help="Free-form note attached to the server"),
     tag: list[str] | None = typer.Option(None, "--tag", "-t", help="Tag (repeatable: -t prod -t db)"),
     local_forward: list[str] | None = typer.Option(
-        None, "-L", help=r"Local forward, repeatable: \[bind:]port:host:port"
+        None, "-L", "--local-forward", help=r"Local forward, repeatable: \[bind:]port:host:port"
     ),
     remote_forward: list[str] | None = typer.Option(
-        None, "-R", help=r"Remote forward, repeatable: \[bind:]port:host:port"
+        None, "-R", "--remote-forward", help=r"Remote forward, repeatable: \[bind:]port:host:port"
     ),
     dynamic_forward: list[str] | None = typer.Option(
-        None, "-D", help=r"Dynamic SOCKS forward, repeatable: \[bind:]port"
+        None, "-D", "--dynamic-forward", help=r"Dynamic SOCKS forward, repeatable: \[bind:]port"
     ),
     x11: bool = typer.Option(False, "--x11", help="Enable X11 forwarding (ssh -X)"),
     env: list[str] | None = typer.Option(
@@ -220,7 +224,7 @@ def add_server(
 @app.command("edit", help="Edit a server. Alias: e")
 @app.command("e", hidden=True)
 def edit(
-    query: str | None = typer.Argument(None, help="ID/name/partial name (optional)"),
+    query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
     name_opt: str | None = typer.Option(None, "--name", help="Rename the server"),
     host_opt: str | None = typer.Option(None, "--host", help="New host"),
     port_opt: int | None = typer.Option(None, "--port", help="New port", min=1, max=65535),
@@ -230,7 +234,11 @@ def edit(
     password_flag: str | None = typer.Option(
         None,
         "--password",
-        help="Password (empty string clears; WARNING: visible in shell history)",
+        help=(
+            "Password (empty string clears). WARNING: values passed on the command line "
+            "end up in shell history and /proc/<pid>/cmdline; prefer the interactive prompt "
+            "or source the value from a secret store at invocation time."
+        ),
     ),
     jump: str | None = typer.Option(
         None, "--jump", "-J", help="Saved server name to use as ProxyJump (empty string clears)"
@@ -241,10 +249,15 @@ def edit(
     note: str | None = typer.Option(None, "--notes", help="Free-form note (empty string clears)"),
     tag: list[str] | None = typer.Option(None, "--tag", "-t", help="Tag (repeatable; replaces existing tags)"),
     local_forward: list[str] | None = typer.Option(
-        None, "-L", help="Local forward (repeatable; any -L/-R/-D flag replaces existing forwards)"
+        None,
+        "-L",
+        "--local-forward",
+        help="Local forward (repeatable; any -L/-R/-D flag replaces existing forwards)",
     ),
-    remote_forward: list[str] | None = typer.Option(None, "-R", help="Remote forward (repeatable)"),
-    dynamic_forward: list[str] | None = typer.Option(None, "-D", help="Dynamic SOCKS forward (repeatable)"),
+    remote_forward: list[str] | None = typer.Option(None, "-R", "--remote-forward", help="Remote forward (repeatable)"),
+    dynamic_forward: list[str] | None = typer.Option(
+        None, "-D", "--dynamic-forward", help="Dynamic SOCKS forward (repeatable)"
+    ),
     clear_forwards: bool = typer.Option(False, "--no-forwards", help="Clear all port forwards"),
     x11: bool | None = typer.Option(
         None,
@@ -573,7 +586,7 @@ def edit(
 @app.command("remove", help="Remove a server. Alias: rm")
 @app.command("rm", hidden=True)
 def remove(
-    query: str | None = typer.Argument(None, help="ID/name/partial name (optional)"),
+    query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
     yes: bool = typer.Option(
         False,
         "--yes",
@@ -640,7 +653,9 @@ def remove(
 
 @app.command("view", help="Show a detailed card for one server. Alias: v")
 @app.command("v", hidden=True)
-def view(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+def view(
+    query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
+):
     """Show a detailed card for one server."""
     all_servers = storage.load_servers()
     if not all_servers:
