@@ -211,12 +211,13 @@ pre.shell .cmt    { color: var(--fg-muted); font-style: italic; }
 pre.shell .out    { color: var(--fg-dim); }
 
 /* ---- Features grid ----------------------------------------------------- */
-/* auto-fit + minmax reflows gracefully for any card count: at --maxw 880px
-   that yields ~3 columns, at ~600px two, at narrow widths one. Works for
-   the current 9 cards and keeps working if we add/remove any. */
+/* Hard 3×3 at the page's max width — the nine feature cards line up in a
+   clean square. Drops to a single column on phones; no intermediate
+   two-column step, because 9 cards at 2-col lays out 4+4+1 with a lonely
+   orphan row, which looks worse than a straight vertical list. */
 .features-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 1rem;
   margin-top: 0.5rem;
 }
@@ -285,8 +286,9 @@ pre.shell .out    { color: var(--fg-dim); }
     transform: rotate(90deg);
     margin: 0.2rem 0;
   }
-  /* .features-grid uses auto-fit + minmax — it reflows on its own without
-     a mobile override here. */
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
   .install-box {
     font-size: 0.78rem;
   }
