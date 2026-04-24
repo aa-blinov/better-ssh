@@ -793,6 +793,159 @@ def test_import_command_merge_mode_preserves_existing(
     assert names == {"Keep", "New"}
 
 
+def test_import_replace_flag_skips_mode_picker(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test `--replace` bypasses the interactive mode picker (still prompts for safety)."""
+    save_servers([Server(id="old-1", name="Old", host="o.example", username="u")])
+
+    backup = tmp_path / "backup.json"
+    backup.write_text(
+        '{"servers": [{"id": "new-1", "name": "New", "host": "n.example", "port": 22, "username": "u"}]}',
+        encoding="utf-8",
+    )
+
+    def fail_picker(**kw):
+        raise AssertionError("--replace must bypass the inquirer.select mode picker")
+
+    monkeypatch.setattr("app.cli.inquirer.select", fail_picker)
+    # Safety confirm still fires; auto-accept it
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: True)
+
+    result = runner.invoke(app, ["import", str(backup), "--replace"])
+
+    assert result.exit_code == 0
+    assert {s.name for s in load_servers()} == {"New"}
+
+
+def test_import_yes_flag_skips_safety_confirm(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test `--replace --yes` wipes existing servers with no prompts at all (scripting path)."""
+    save_servers(
+        [
+            Server(id="a", name="A", host="a.example", username="u"),
+            Server(id="b", name="B", host="b.example", username="u"),
+        ]
+    )
+
+    backup = tmp_path / "backup.json"
+    backup.write_text(
+        '{"servers": [{"id": "new-1", "name": "Fresh", "host": "f.example", "port": 22, "username": "u"}]}',
+        encoding="utf-8",
+    )
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError("--yes must bypass the safety confirmation")
+
+    def fail_picker(**kw):
+        raise AssertionError("--replace must bypass the mode picker")
+
+    monkeypatch.setattr("app.cli.typer.confirm", fail_confirm)
+    monkeypatch.setattr("app.cli.inquirer.select", fail_picker)
+
+    result = runner.invoke(app, ["import", str(backup), "--replace", "--yes"])
+
+    assert result.exit_code == 0
+    assert {s.name for s in load_servers()} == {"Fresh"}
+
+
+def test_import_safety_prompt_spells_out_destructive_replace(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test the safety prompt in replace mode explicitly mentions DELETE and counts.
+
+    Guards against the original UX trap where a bare "Continue with import?"
+    made it trivially easy to wipe the entire store by reflex-answering y.
+    """
+    save_servers(
+        [
+            Server(id="a", name="A", host="a.example", username="u"),
+            Server(id="b", name="B", host="b.example", username="u"),
+        ]
+    )
+
+    backup = tmp_path / "backup.json"
+    backup.write_text(
+        '{"servers": [{"id": "n", "name": "N", "host": "n.example", "port": 22, "username": "u"}]}',
+        encoding="utf-8",
+    )
+
+    prompts: list[str] = []
+
+    def capture_confirm(text, **kw):
+        prompts.append(text)
+        return False  # decline so nothing happens
+
+    monkeypatch.setattr("app.cli.typer.confirm", capture_confirm)
+
+    result = runner.invoke(app, ["import", str(backup), "--replace"])
+
+    assert result.exit_code == 0
+    # The safety prompt must mention DELETE, the count, and the import size
+    assert prompts, "expected a safety confirm to fire"
+    safety = prompts[-1]
+    assert "DELETE" in safety
+    assert "2" in safety  # count of existing servers
+    assert "1" in safety  # count of imported servers
+
+
+def test_import_rejects_both_merge_and_replace(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+):
+    """Test `--merge` + `--replace` together is rejected with rc=2 (usage error)."""
+    backup = tmp_path / "backup.json"
+    backup.write_text(
+        '{"servers": [{"id": "n", "name": "N", "host": "n.example", "port": 22, "username": "u"}]}',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["import", str(backup), "--merge", "--replace"])
+
+    assert result.exit_code == 2
+    assert "mutually exclusive" in result.output
+
+
+def test_import_ssh_config_yes_flag_skips_safety_confirm(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Test `bssh isc --replace --yes` wipes and imports with no prompts."""
+    save_servers([Server(id="old-1", name="Old", host="o.example", username="u")])
+
+    config_file = tmp_path / "custom.cfg"
+    config_file.write_text("Host web\n  HostName w.example\n  User root\n", encoding="utf-8")
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError("--yes must bypass the safety confirmation")
+
+    def fail_picker(**kw):
+        raise AssertionError("--replace must bypass the mode picker")
+
+    monkeypatch.setattr("app.cli.typer.confirm", fail_confirm)
+    monkeypatch.setattr("app.cli.inquirer.select", fail_picker)
+
+    result = runner.invoke(app, ["isc", str(config_file), "--replace", "--yes"])
+
+    assert result.exit_code == 0
+    names = {s.name for s in load_servers()}
+    assert "Old" not in names  # existing wiped
+    assert "web" in names  # imported
+
+
 def test_import_command_rejects_missing_file(
     runner: CliRunner,
     temp_config_dir: Path,

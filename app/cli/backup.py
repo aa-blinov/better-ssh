@@ -122,8 +122,28 @@ def export_servers(
 @app.command("im", hidden=True)
 def import_servers(
     input_file: str = typer.Argument(..., help="Input file path (e.g., backup.json)"),
+    merge: bool = typer.Option(
+        False,
+        "--merge",
+        help="Keep existing servers; add/update by ID from import. Skips the mode picker.",
+    ),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help="WIPE existing servers and use only the import. Skips the mode picker.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Auto-confirm the safety prompt (for scripts / CI).",
+    ),
 ):
     """Import servers configuration from JSON file."""
+    if merge and replace:
+        console.print("[red]--merge and --replace are mutually exclusive.[/red]")
+        raise typer.Exit(2)
+
     input_path = Path(input_file)
 
     if not input_path.exists():
@@ -157,40 +177,61 @@ def import_servers(
         )
 
     existing_servers = storage.load_servers()
-    merge_mode = False
+    merge_mode = True  # default when no existing servers — nothing to delete
 
+    # Mode selection: flag → interactive picker → default merge-when-empty.
     if existing_servers:
         console.print(f"\n[yellow]You have {len(existing_servers)} existing server(s).[/yellow]")
 
-        try:
-            mode_choice = inquirer.select(
-                message="Select import mode:",
-                choices=[
-                    "Replace all - delete existing servers and import new ones",
-                    "Merge - keep existing servers and add/update from import",
-                ],
-                cycle=True,
-                vi_mode=False,
-            ).execute()
-        except KeyboardInterrupt:
-            console.print("\n[dim]Cancelled.[/dim]")
-            raise typer.Exit(0)
-
-        merge_mode = "Merge" in mode_choice
+        if merge:
+            merge_mode = True
+        elif replace:
+            merge_mode = False
+        else:
+            try:
+                mode_choice = inquirer.select(
+                    message="Select import mode:",
+                    choices=[
+                        "Merge - keep existing servers and add/update from import",
+                        "Replace all - delete existing servers and import new ones",
+                    ],
+                    cycle=True,
+                    vi_mode=False,
+                ).execute()
+            except KeyboardInterrupt:
+                console.print("\n[dim]Cancelled.[/dim]")
+                raise typer.Exit(0)
+            merge_mode = "Merge" in mode_choice
 
         if merge_mode:
             console.print("\n[cyan]Merge mode:[/cyan] Existing servers will be kept.")
             console.print("Servers with same ID will be updated.\n")
         else:
-            console.print("\n[red]Replace mode:[/red] All existing servers will be deleted!\n")
+            console.print(
+                f"\n[bold red]Replace mode:[/bold red] All [bold]{len(existing_servers)}[/bold] "
+                "existing server(s) will be DELETED and replaced with the import.\n"
+            )
 
-    try:
-        if not typer.confirm("Continue with import?", default=False):
-            console.print("[dim]Cancelled.[/dim]")
+    # Safety confirmation: wording is explicit about the destructive nature
+    # when replace-mode is active, so a reflex "y" at a vague "Continue?"
+    # can't wipe the entire store. --yes skips this prompt for scripted runs.
+    if not yes:
+        if not existing_servers:
+            prompt_text = f"Import {len(imported_servers)} server(s) from '{input_file}'?"
+        elif merge_mode:
+            prompt_text = f"Import {len(imported_servers)} server(s), merging with {len(existing_servers)} existing?"
+        else:
+            prompt_text = (
+                f"DELETE all {len(existing_servers)} existing server(s) and "
+                f"import {len(imported_servers)} from '{input_file}'?"
+            )
+        try:
+            if not typer.confirm(prompt_text, default=False):
+                console.print("[dim]Cancelled.[/dim]")
+                raise typer.Exit(0)
+        except (KeyboardInterrupt, typer.Abort):
+            console.print("\n[dim]Cancelled.[/dim]")
             raise typer.Exit(0)
-    except (KeyboardInterrupt, typer.Abort):
-        console.print("\n[dim]Cancelled.[/dim]")
-        raise typer.Exit(0)
 
     if merge_mode:
         existing_by_id = {s.id: s for s in existing_servers}
@@ -209,8 +250,28 @@ def import_servers(
 @app.command("isc", hidden=True)
 def import_ssh_config_cmd(
     config_file: str | None = typer.Argument(None, help="SSH config path (default: ~/.ssh/config)"),
+    merge: bool = typer.Option(
+        False,
+        "--merge",
+        help="Update matching names; keep existing servers. Skips the mode picker.",
+    ),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help="WIPE existing servers and use only the SSH-config hosts. Skips the mode picker.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Auto-confirm the safety prompt (for scripts / CI).",
+    ),
 ):
     """Import servers from an OpenSSH config file."""
+    if merge and replace:
+        console.print("[red]--merge and --replace are mutually exclusive.[/red]")
+        raise typer.Exit(2)
+
     config_path = Path(config_file).expanduser() if config_file else get_default_ssh_config_path()
 
     if not config_path.exists():
@@ -234,39 +295,59 @@ def import_ssh_config_cmd(
         )
 
     existing_servers = storage.load_servers()
-    merge_mode = True
+    merge_mode = True  # default when no existing servers
 
+    # Mode selection: flag → interactive picker → merge-by-default when empty.
     if existing_servers:
         console.print(f"\n[yellow]You have {len(existing_servers)} existing server(s).[/yellow]")
 
-        try:
-            mode_choice = inquirer.select(
-                message="Select SSH config import mode:",
-                choices=[
-                    "Merge - update matching host names and keep everything else",
-                    "Replace all - delete existing servers and use only SSH config hosts",
-                ],
-                cycle=True,
-                vi_mode=False,
-            ).execute()
-        except KeyboardInterrupt:
-            console.print("\n[dim]Cancelled.[/dim]")
-            raise typer.Exit(0)
-
-        merge_mode = "Merge" in mode_choice
+        if merge:
+            merge_mode = True
+        elif replace:
+            merge_mode = False
+        else:
+            try:
+                mode_choice = inquirer.select(
+                    message="Select SSH config import mode:",
+                    choices=[
+                        "Merge - update matching host names and keep everything else",
+                        "Replace all - delete existing servers and use only SSH config hosts",
+                    ],
+                    cycle=True,
+                    vi_mode=False,
+                ).execute()
+            except KeyboardInterrupt:
+                console.print("\n[dim]Cancelled.[/dim]")
+                raise typer.Exit(0)
+            merge_mode = "Merge" in mode_choice
 
         if merge_mode:
             console.print("\n[cyan]Merge mode:[/cyan] Matching names will be updated, metadata will be preserved.\n")
         else:
-            console.print("\n[red]Replace mode:[/red] All existing servers will be deleted!\n")
+            console.print(
+                f"\n[bold red]Replace mode:[/bold red] All [bold]{len(existing_servers)}[/bold] "
+                "existing server(s) will be DELETED and replaced with the SSH-config hosts.\n"
+            )
 
-    try:
-        if not typer.confirm("Continue with SSH config import?", default=False):
-            console.print("[dim]Cancelled.[/dim]")
+    # Safety confirmation with explicit counts (see import_servers for the
+    # rationale — bare "Continue?" is too easy to auto-accept).
+    if not yes:
+        if not existing_servers:
+            prompt_text = f"Import {len(imported_servers)} host(s) from '{escape(str(config_path))}'?"
+        elif merge_mode:
+            prompt_text = f"Import {len(imported_servers)} host(s), merging with {len(existing_servers)} existing?"
+        else:
+            prompt_text = (
+                f"DELETE all {len(existing_servers)} existing server(s) and "
+                f"import {len(imported_servers)} from '{escape(str(config_path))}'?"
+            )
+        try:
+            if not typer.confirm(prompt_text, default=False):
+                console.print("[dim]Cancelled.[/dim]")
+                raise typer.Exit(0)
+        except (KeyboardInterrupt, typer.Abort):
+            console.print("\n[dim]Cancelled.[/dim]")
             raise typer.Exit(0)
-    except (KeyboardInterrupt, typer.Abort):
-        console.print("\n[dim]Cancelled.[/dim]")
-        raise typer.Exit(0)
 
     if merge_mode:
         final_servers = _merge_servers_by_name(existing_servers, imported_servers)

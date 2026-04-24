@@ -470,6 +470,24 @@ The importer resolves each host through `ssh -G`, so `Host *`, `Include`, explic
 
 Default OpenSSH keys remain implicit. If a host works with plain `ssh host` because of default keys or `ssh-agent`, `bssh` will keep using that behavior without pinning a key path unless your SSH config explicitly does so.
 
+When servers already exist locally, both `bssh import` (JSON) and `bssh isc` (SSH config) ask how to reconcile — keep existing + add new (**merge**) or wipe and replace (**replace**). Flags let you pick in scripts:
+
+```bash
+# Interactive: mode picker + explicit safety confirm naming the counts
+bssh import backup.json
+bssh isc
+
+# Non-interactive: pre-pick the mode
+bssh import backup.json --merge
+bssh isc --replace
+
+# CI / scripted (skip the safety prompt entirely):
+bssh import backup.json --replace --yes    # WIPES everything and imports
+bssh isc --merge -y
+```
+
+The safety confirmation spells out the destructive action with counts: `DELETE all 12 existing server(s) and import 3 from 'backup.json'?` — so a reflex `y` doesn't silently wipe the store. Passing `--merge` and `--replace` together is rejected (rc=2).
+
 ### Parallel Command Broadcast
 
 `bssh exec` runs a single shell command on every server matched by a query, in parallel, with a per-host colored prefix on each output line and an aggregated summary at the end.
