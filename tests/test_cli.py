@@ -636,7 +636,13 @@ def test_export_ssh_config_command_overwrite_prompt_declined(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Test declining the overwrite confirm leaves the existing file untouched."""
+    """Test declining the overwrite confirm leaves the file untouched AND returns rc=1.
+
+    rc=1 (not 0) lets scripts distinguish "file written" from "user declined" —
+    exit 0 would be ambiguous for pipelines that need to know whether the
+    export actually happened. The cancel message should also surface --force
+    as the scripting escape hatch.
+    """
     save_servers([Server(id="a", name="alpha", host="a.example", username="u")])
     existing = tmp_path / "existing.conf"
     existing.write_text("# do not touch\n", encoding="utf-8")
@@ -644,8 +650,74 @@ def test_export_ssh_config_command_overwrite_prompt_declined(
 
     result = runner.invoke(app, ["export-ssh-config", str(existing)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert existing.read_text(encoding="utf-8") == "# do not touch\n"
+    assert "--force" in result.output
+
+
+def test_export_ssh_config_force_flag_overwrites_without_prompt(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `--force` overwrites an existing file without prompting (scripting path)."""
+    save_servers([Server(id="a", name="alpha", host="a.example", username="u")])
+    existing = tmp_path / "existing.conf"
+    existing.write_text("# old content\n", encoding="utf-8")
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError("--force must bypass the overwrite confirmation")
+
+    monkeypatch.setattr("app.cli.backup.typer.confirm", fail_confirm)
+
+    result = runner.invoke(app, ["export-ssh-config", str(existing), "--force"])
+
+    assert result.exit_code == 0
+    assert "Host alpha" in existing.read_text(encoding="utf-8")
+
+
+def test_export_declines_overwrite_returns_nonzero(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh export` returns rc=1 on user-declined overwrite (symmetric with export-ssh-config)."""
+    save_servers([Server(id="a", name="alpha", host="a.example", username="u")])
+    existing = tmp_path / "backup.json"
+    existing.write_text('{"do": "not touch"}', encoding="utf-8")
+    monkeypatch.setattr("app.cli.backup.typer.confirm", lambda *a, **kw: False)
+
+    result = runner.invoke(app, ["export", str(existing)])
+
+    assert result.exit_code == 1
+    assert existing.read_text(encoding="utf-8") == '{"do": "not touch"}'
+    assert "--force" in result.output
+
+
+def test_export_force_flag_overwrites_without_prompt(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh export -f` overwrites without prompting (scripting path)."""
+    save_servers([Server(id="a", name="alpha", host="a.example", username="u")])
+    existing = tmp_path / "backup.json"
+    existing.write_text('{"old": true}', encoding="utf-8")
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError("-f must bypass the overwrite confirmation")
+
+    monkeypatch.setattr("app.cli.backup.typer.confirm", fail_confirm)
+
+    result = runner.invoke(app, ["export", str(existing), "-f"])
+
+    assert result.exit_code == 0
+    written = existing.read_text(encoding="utf-8")
+    assert '"alpha"' in written
+    assert '"old"' not in written
 
 
 def test_export_ssh_config_alias_esc(

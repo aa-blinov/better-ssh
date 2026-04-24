@@ -525,7 +525,7 @@ After exporting, activate the file by adding
 Include ~/.ssh/config.bssh
 ```
 
-to your `~/.ssh/config`, or pass `-F ~/.ssh/config.bssh` directly to `ssh`. Overwriting an existing file prompts for confirmation.
+to your `~/.ssh/config`, or pass `-F ~/.ssh/config.bssh` directly to `ssh`. Overwriting an existing file prompts for confirmation — pass `-f` / `--force` (or use `bssh export -f` for the JSON variant) to skip the prompt for scripts/CI. Exit code is `0` on success, `1` when the user declines the overwrite prompt, so pipelines can tell whether the file was actually written.
 
 ### Server Identification
 

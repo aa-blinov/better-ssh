@@ -21,6 +21,12 @@ from ._shared import _merge_servers_by_name, app, console
 @app.command("ex", hidden=True)
 def export_servers(
     output: str = typer.Argument(..., help="Output file path (e.g., backup.json)"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Overwrite the destination without prompting (for scripts / CI).",
+    ),
 ):
     """Export servers configuration to JSON file."""
     servers = storage.load_servers()
@@ -62,14 +68,20 @@ def export_servers(
 
     output_path = Path(output)
 
-    if output_path.exists():
+    # Exit code semantics for the overwrite branch:
+    #   - File written (new or overwritten): 0
+    #   - User declined overwrite / Ctrl+C: 1 — makes "did this actually run?"
+    #     trivially scriptable via `$?`. Cancellation is not an error per se,
+    #     but from a pipeline's perspective the thing it asked for did not
+    #     happen. Pass --force to skip the prompt entirely.
+    if output_path.exists() and not force:
         try:
             if not typer.confirm(f"File '{output}' already exists. Overwrite?", default=False):
-                console.print("[dim]Cancelled.[/dim]")
-                raise typer.Exit(0)
+                console.print("[dim]Cancelled.[/dim] Pass [cyan]--force[/cyan] to overwrite without prompting.")
+                raise typer.Exit(1)
         except (KeyboardInterrupt, typer.Abort):
             console.print("\n[dim]Cancelled.[/dim]")
-            raise typer.Exit(0)
+            raise typer.Exit(1)
 
     # Prepare servers for export.
     # load_servers already decrypts; if we want encrypted export, re-encrypt.
@@ -270,6 +282,12 @@ def import_ssh_config_cmd(
 @app.command("esc", hidden=True)
 def export_ssh_config_cmd(
     output: str = typer.Argument(..., help="Output path (e.g., ~/.ssh/config.bssh or ~/.ssh/config.d/bssh.conf)"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Overwrite the destination without prompting (for scripts / CI).",
+    ),
 ):
     """Export saved servers as an OpenSSH-config-compatible file.
 
@@ -286,14 +304,16 @@ def export_ssh_config_cmd(
 
     output_path = Path(output).expanduser()
 
-    if output_path.exists():
+    # Same exit-code semantics as `bssh export`: rc=1 on decline so scripts
+    # can distinguish "written" from "no-op". Pass --force to skip the prompt.
+    if output_path.exists() and not force:
         try:
             if not typer.confirm(f"File {escape(str(output_path))!r} already exists. Overwrite?", default=False):
-                console.print("[dim]Cancelled.[/dim]")
-                raise typer.Exit(0)
+                console.print("[dim]Cancelled.[/dim] Pass [cyan]--force[/cyan] to overwrite without prompting.")
+                raise typer.Exit(1)
         except (KeyboardInterrupt, typer.Abort):
             console.print("\n[dim]Cancelled.[/dim]")
-            raise typer.Exit(0)
+            raise typer.Exit(1)
 
     content = render_servers_as_ssh_config(servers)
 
