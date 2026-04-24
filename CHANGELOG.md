@@ -1,0 +1,89 @@
+# Changelog
+
+All notable changes to this project are documented here.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.0] — 2026-04-24
+
+First tagged release. `0.1.0` was the initial scaffold and was never
+published; this release is the point where the CLI surface stabilizes.
+
+### Core commands
+
+- `bssh` (interactive picker), `bssh <query>` (direct connect when the
+  query uniquely matches), `bssh connect` / `c`
+- `bssh add` / `a`, `bssh edit` / `e`, `bssh remove` / `rm`,
+  `bssh view` / `v`, `bssh list` / `ls`
+- `bssh ping` / `p`, `bssh health` / `h`
+- `bssh pin`, `bssh unpin`, `bssh recent` / `r`
+- `bssh copy-pass` / `cp`, `bssh show-pass` / `sp`
+- `bssh encrypt` / `enc`, `bssh decrypt` / `dec`,
+  `bssh encryption-status` / `es`
+- `bssh import` / `im`, `bssh export` / `ex`,
+  `bssh import-ssh-config` / `isc`, `bssh export-ssh-config` / `esc`
+- `bssh put`, `bssh get` (scp wrappers), `bssh exec` (parallel broadcast)
+
+### Connection features
+
+- ProxyJump / bastion chain support (`-J` under the hood)
+- Port forwarding — local (`-L`), remote (`-R`), dynamic SOCKS (`-D`)
+- X11 forwarding (`-X`) per server
+- Per-server SSH keep-alive (`ServerAliveInterval`)
+- Per-server `SetEnv` environment variables
+- Pre- and post-connect local shell hooks (VPN setup, cleanup, etc.)
+- SSH key and certificate authentication
+- Automatic password clipboard integration (Windows / macOS / Linux)
+
+### Storage & crypto
+
+- Password encryption via your SSH private key (Fernet + PBKDF2-HMAC-SHA256,
+  100k iterations, random per-installation salt)
+- Transparent encrypt-on-save / decrypt-on-load
+- Graceful handling of irrecoverable passwords (key rotation, etc.)
+- Round-trip with OpenSSH config — `isc` imports Host blocks via `ssh -G`,
+  `esc` writes them back out for other tools to consume
+
+### UX
+
+- Unified query semantics across every single-target command — matches by
+  id, name, host, username, tag, or jump host
+- Interactive pickers prioritize recently-used servers
+- Pinned favorites stay above the normal list
+- Per-server last-used timestamp surfaced in `ls` and `recent`
+- Direct prompts for free-text optional fields (note, tags) — no more
+  "Add a note? [y/N]: my note" trap
+- Confirm-then-prompt for shell commands (pre/post) so a stray `n` doesn't
+  become a command that runs on every connect
+- Explicit destructive prompts on `import`: `DELETE all 12 existing
+  server(s) and import 3 from 'backup.json'?`
+
+### Non-interactive / scripting
+
+- `--skip/-s` on `add` and `edit` — apply only the flags, skip prompts
+- `--yes/-y` on `encrypt`, `decrypt`, `remove`, `import`, `isc`
+- `--force/-f` on `export`, `esc` — overwrite without prompting;
+  rc=1 when the user declines (scripts can tell whether the file was
+  actually written)
+- `--merge` / `--replace` on `import` / `isc` — pre-pick the mode
+- `--no-forwards` / `--no-env` / `--no-pre` / `--no-post` clear flags
+  (friendly to PowerShell, which eats `--flag ""`)
+- Every destructive operation surfaces a meaningful exit code
+
+### Parallelism
+
+- `bssh exec` runs commands across matched servers concurrently with
+  per-host colored output and an aggregated summary
+- `bssh health` probes all servers in parallel (was serial — O(N × timeout)
+  worst case, now O(timeout))
+
+### Cross-platform
+
+- Windows 10/11, macOS 10.15+, Linux (any distro with Python 3.12+)
+- Platform-specific paste hints, clipboard fallback messages,
+  SSH-client-missing install instructions
+
+### Testing
+
+- 382 tests, ~85% branch coverage
+- GitHub Actions CI with Codecov integration
