@@ -529,11 +529,16 @@ to your `~/.ssh/config`, or pass `-F ~/.ssh/config.bssh` directly to `ssh`. Over
 
 ### Server Identification
 
-Servers can be identified by:
+Every command that takes a `<query>` argument (`connect`, `edit`, `view`, `remove`, `pin`, `unpin`, `ping`, `put`, `get`, `copy-pass`, `show-pass`, `ls`, `exec`, `health`) resolves it the same way. Match order for a single-target command:
 
-- Full name (case-insensitive)
-- Partial name match
-- Server ID prefix
+1. Exact server ID
+2. Unique server-ID prefix
+3. Exact name (case-insensitive)
+4. **Unique broad match** — case-insensitive substring in name, host, username, any tag, or jump host
+
+If step 4 finds more than one server, the command drops into an interactive picker over the matching candidates (same set `bssh ls <query>` would print). If nothing matches at all, the command prints a "not found" error.
+
+`bssh ls <query>` and `bssh exec <query>` print / act on every matching server directly, so they skip the picker step; the match fields are the same.
 
 Names are unique (case-insensitive): adding or renaming to a name already in use is rejected with an error pointing at the existing entry.
 
