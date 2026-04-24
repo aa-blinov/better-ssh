@@ -26,7 +26,15 @@ from ._shared import (
 )
 
 
-@app.command("add", help="Add a new server. Alias: a")
+@app.command(
+    "add",
+    help=(
+        "Add a new server. Alias: a\n\n"
+        "Names are unique (case-insensitive); attempting to add a name that already "
+        "exists fails fast with an error pointing at the existing entry, before any "
+        "credential prompts run."
+    ),
+)
 @app.command("a", hidden=True)
 def add_server(
     name: str | None = typer.Option(None, prompt=True, help="Server name"),
@@ -221,7 +229,17 @@ def add_server(
         raise typer.Exit(0)
 
 
-@app.command("edit", help="Edit a server. Alias: e")
+@app.command(
+    "edit",
+    help=(
+        "Edit a server. Alias: e\n\n"
+        "Accepts the same field flags as `bssh add` (--key, --certificate, --password, "
+        "--jump, --keep-alive, --notes, --tag, -L/-R/-D, --x11, --env, --pre, --post) "
+        "plus --name / --host / --port / --username for in-place updates. By default, "
+        "flags you pass are applied and the rest is reviewed interactively. Pass "
+        "--skip/-s to apply only the flags and skip the interactive review entirely."
+    ),
+)
 @app.command("e", hidden=True)
 def edit(
     query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),

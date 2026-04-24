@@ -21,7 +21,15 @@ def root(ctx: typer.Context) -> None:
     connect_cmd(query=None, copy=True)
 
 
-@app.command("connect", help="Connect to a server. Alias: c")
+@app.command(
+    "connect",
+    help=(
+        "Connect to a server. Alias: c\n\n"
+        "Shortcuts: bare `bssh` opens the interactive picker; `bssh <query>` is "
+        "equivalent to `bssh connect <query>` and auto-connects when the query "
+        "uniquely matches one server (otherwise it falls back to the picker)."
+    ),
+)
 @app.command("c", hidden=True)
 def connect_cmd(
     query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
