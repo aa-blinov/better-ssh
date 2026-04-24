@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.3.0] — 2026-04-25
+
 ### Added
 
 - **`bssh sftp <query>`** — interactive SFTP session against a saved server.
@@ -14,6 +17,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same way `bssh connect` does. Fills the gap between `bssh put`/`get`
   (one-shot, known path) and raw `sftp user@host -P port -i key -J jump`
   (retype everything). `--copy/--no-copy` flag mirrors `bssh connect`.
+
+- **Landing page** — <https://aa-blinov.github.io/better-ssh/>. Separate
+  from the README: the site pitches the "why" (problem, before/after
+  comparison, feature highlights), the README stays the reference manual
+  for users already committed. Deployed via GitHub Pages on every
+  `docs/**` change.
+
+### Changed
+
+- README documentation sweep for accuracy:
+  - `bssh list --help` short-help now advertises `jump/id-prefix` among
+    matchable fields (it matched them already; the help string lagged).
+  - Forward-flag reference table shows both short and long forms
+    (`--local-forward` / `-L`, etc. — long forms added in 0.2 polish).
+  - The paragraph on interactive `bssh add` now reflects the
+    direct-prompt style for note/tags (no more "Add a note? [y/N]" trap).
+  - Before/after code block on the landing page had `-J` before `-L`
+    in a quoted SSH command; actual `connect()` emits `-L` first. Swapped.
+
+### Infrastructure
+
+- `.pre-commit-config.yaml` — ruff lint/format, trailing-whitespace,
+  EOF, line-ending normalization, YAML/TOML syntax checks. Runs
+  per-PR via pre-commit.ci (enable at <https://pre-commit.ci>) and
+  locally via `uv run pre-commit install`.
+- `.github/dependabot.yml` — weekly grouped Python-dep bumps (minor +
+  patch bundled, majors individual), monthly grouped GitHub Actions.
+- `.github/pull_request_template.md` — PR checklist pointing
+  contributors at pytest, ruff, README, and CHANGELOG.
+- `.github/workflows/release.yml` — removed the broken PyPI publish
+  job (trusted publishing was never configured); GitHub Release asset
+  upload now runs directly after build.
+- Repo metadata (description, homepage, topics) populated on GitHub
+  for discoverability.
 
 
 ## [0.2.0] — 2026-04-24
@@ -134,4 +171,5 @@ identically. Verify with `bssh --help`.
 - Extensive test suite (~85% branch coverage), GitHub Actions CI,
   Codecov integration.
 
+[0.3.0]: https://github.com/aa-blinov/better-ssh/releases/tag/v0.3.0
 [0.2.0]: https://github.com/aa-blinov/better-ssh/releases/tag/v0.2.0
