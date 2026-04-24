@@ -203,7 +203,7 @@ Use `bssh pin <query>` to keep critical hosts above the normal recent/frequent o
 
 Most commands work without arguments and will present an interactive menu.
 
-`bssh add` interactively asks whether to set an SSH key, password, jump host, note, and keep-alive after the basic fields. All of these also have non-interactive flags for scripted use (see [Adding Servers Non-Interactively](#adding-servers-non-interactively)).
+`bssh add` walks through the optional fields after Name/Host/Port/Username. Binary/complex fields (SSH key, password, jump host, keep-alive, forwards, env vars, pre/post hooks) use a y/N confirm before asking for the value. Free-text fields (note, tags) use a direct prompt with "(Enter to skip)" — a one-keystroke skip if you don't want one, or just type the value. All of these also have non-interactive flags for scripted use (see [Adding Servers Non-Interactively](#adding-servers-non-interactively)).
 
 For password-based hosts, `bssh` copies the saved password to your clipboard before starting OpenSSH. You still paste it into the SSH password prompt manually; the password is not injected into the `ssh` command automatically.
 
@@ -262,9 +262,9 @@ Flag reference:
 | `--keep-alive <seconds>` | `-K` | `ServerAliveInterval` in seconds; `0` leaves it disabled |
 | `--notes <text>` | — | Free-form note attached to the server |
 | `--tag <value>` | `-t` | Tag (repeatable: `-t prod -t db`) |
-| `-L <spec>` | — | Local forward, repeatable: `-L [bind:]port:host:port` |
-| `-R <spec>` | — | Remote forward, repeatable: `-R [bind:]port:host:port` |
-| `-D <spec>` | — | Dynamic SOCKS forward, repeatable: `-D [bind:]port` |
+| `--local-forward <spec>` | `-L` | Local forward, repeatable: `[bind:]port:host:port` |
+| `--remote-forward <spec>` | `-R` | Remote forward, repeatable: `[bind:]port:host:port` |
+| `--dynamic-forward <spec>` | `-D` | Dynamic SOCKS forward, repeatable: `[bind:]port` |
 | `--x11` | — | Enable X11 forwarding (`ssh -X`) |
 | `--env <K=V>` | `-e` | Environment variable pushed via `ssh -o SetEnv` (repeatable) |
 | `--pre <cmd>` | — | Shell command run locally BEFORE each connect (empty string clears) |

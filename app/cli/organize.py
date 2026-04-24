@@ -39,10 +39,16 @@ def recent_servers(
     _print_servers(used[:limit], sort=False, title=f"Recent {min(limit, len(used))} of {len(used)}")
 
 
-@app.command("list", help="Show list of servers. Alias: ls. Optional query filters by name/host/user/tag.")
+@app.command(
+    "list",
+    help="Show list of servers. Alias: ls. Optional query filters by name/host/user/tag/jump/id-prefix.",
+)
 @app.command("ls", hidden=True)
 def list_servers(
-    query: str | None = typer.Argument(None, help="Filter servers by name, host, username, tag, or id prefix"),
+    query: str | None = typer.Argument(
+        None,
+        help="Filter servers by name/host/user/tag/jump (case-insensitive substring) or id prefix.",
+    ),
 ) -> None:
     """Show list of servers (optionally filtered by query)."""
     servers = storage.load_servers()

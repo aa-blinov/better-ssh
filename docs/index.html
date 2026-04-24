@@ -72,8 +72,8 @@
         <h3>With better-ssh</h3>
 <pre class="shell"><span class="prompt">$</span> bssh prod-db
 <span class="out">Password copied to clipboard.</span>
-<span class="out">SSH: ssh -p 2222 -J deploy@bastion:22
-  -L 5432:localhost:5432
+<span class="out">SSH: ssh -p 2222 -L 5432:localhost:5432
+  -J deploy@bastion:22
   -i /home/u/.ssh/work_ed25519
   deploy@prod-db.internal</span>
 <span class="cmt"># paste, done.</span></pre>
