@@ -14,8 +14,10 @@ from app.ssh import (
     _paste_hint,
     check_server_availability,
     connect,
+    has_sftp,
     has_ssh,
     resolve_jump_chain,
+    sftp_session,
 )
 
 # ---------------------------------------------------------------------------
@@ -771,3 +773,156 @@ def test_connect_without_forwards_does_not_emit_forward_flags(monkeypatch):
     assert "-L" not in cmd
     assert "-R" not in cmd
     assert "-D" not in cmd
+
+
+# ---------------------------------------------------------------------------
+# sftp_session
+# ---------------------------------------------------------------------------
+
+
+def test_has_sftp_when_present(monkeypatch):
+    """sftp binary resolvable on PATH."""
+    monkeypatch.setattr("app.ssh.shutil.which", lambda _: "/usr/bin/sftp")
+    assert has_sftp() is True
+
+
+def test_has_sftp_when_absent(monkeypatch):
+    """sftp binary missing returns False (triggers rc=127 in sftp_session)."""
+    monkeypatch.setattr("app.ssh.shutil.which", lambda _: None)
+    assert has_sftp() is False
+
+
+def test_sftp_session_no_client_returns_127(monkeypatch):
+    """No sftp on PATH -> rc=127, same exit-code convention as ssh client missing."""
+    monkeypatch.setattr("app.ssh.has_sftp", lambda: False)
+    monkeypatch.setattr("app.ssh.console.print", lambda _: None)
+
+    rc = sftp_session(Server(name="s", host="h", username="u"), copy_password=False)
+    assert rc == 127
+
+
+def test_sftp_session_uses_uppercase_P_for_port(monkeypatch):
+    """sftp(1) uses -P (uppercase); ssh(1) uses -p — the easy-to-miss difference."""
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_sftp", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(name="prod", host="prod.example", username="deploy", port=2222)
+    rc = sftp_session(server, copy_password=False)
+
+    assert rc == 0
+    cmd = commands[0]
+    assert cmd[0] == "sftp"
+    assert "-P" in cmd
+    assert "2222" in cmd
+    # Never emit lowercase -p; that would silently fall back to sftp's default port
+    assert "-p" not in cmd
+
+
+def test_sftp_session_omits_connection_only_flags(monkeypatch):
+    """Forwards / env / x11 are connection-time features; sftp must not emit them."""
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_sftp", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    server = Server(
+        name="prod",
+        host="prod.example",
+        username="deploy",
+        forwards=[Forward(type="local", local_port=5432, remote_host="db", remote_port=5432)],
+        environment={"LANG": "en_US.UTF-8"},
+        x11_forwarding=True,
+    )
+    sftp_session(server, copy_password=False)
+
+    cmd = commands[0]
+    assert "-L" not in cmd
+    assert "-R" not in cmd
+    assert "-D" not in cmd
+    assert "-X" not in cmd
+    assert not any("SetEnv=" in part for part in cmd)
+
+
+def test_sftp_session_forwards_jump_chain(monkeypatch):
+    """ProxyJump passes through identically to connect()."""
+    commands: list[list[str]] = []
+    monkeypatch.setattr("app.ssh.has_sftp", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: commands.append(command) or 0)
+
+    bastion = Server(name="bastion", host="b.example", username="ops", port=2222)
+    target = Server(name="target", host="t.example", username="u", jump_host="bastion")
+
+    rc = sftp_session(target, copy_password=False, all_servers=[bastion, target])
+
+    assert rc == 0
+    cmd = commands[0]
+    j_index = cmd.index("-J")
+    assert cmd[j_index + 1] == "ops@b.example:2222"
+    assert cmd[-1] == "u@t.example"
+
+
+def test_sftp_session_runs_pre_and_post_hooks(monkeypatch):
+    """Pre runs before sftp; post runs after, same envelope as connect()."""
+    order: list[str] = []
+
+    def fake_call(cmd, shell=False):
+        if shell:
+            order.append(f"shell:{cmd}")
+            return 0
+        order.append(f"sftp:{cmd[0]}")
+        return 0
+
+    monkeypatch.setattr("app.ssh.has_sftp", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", fake_call)
+
+    server = Server(
+        name="h",
+        host="h.example",
+        username="u",
+        pre_connect_cmd="mount-sshfs",
+        post_connect_cmd="umount-sshfs",
+    )
+    rc = sftp_session(server, copy_password=False)
+
+    assert rc == 0
+    assert order == ["shell:mount-sshfs", "sftp:sftp", "shell:umount-sshfs"]
+
+
+def test_sftp_session_aborts_when_pre_hook_fails(monkeypatch):
+    """Pre failure -> exit early with pre's rc, post does not run, sftp never starts."""
+    calls: list[str] = []
+
+    def fake_call(cmd, shell=False):
+        if shell:
+            calls.append(f"shell:{cmd}")
+            return 2
+        calls.append("sftp")
+        return 0
+
+    monkeypatch.setattr("app.ssh.has_sftp", lambda: True)
+    monkeypatch.setattr("app.ssh.subprocess.call", fake_call)
+
+    server = Server(
+        name="h",
+        host="h.example",
+        username="u",
+        pre_connect_cmd="failing-vpn",
+        post_connect_cmd="should-not-run",
+    )
+    rc = sftp_session(server, copy_password=False)
+
+    assert rc == 2
+    assert calls == ["shell:failing-vpn"]
+
+
+def test_sftp_session_copies_password_to_clipboard(monkeypatch):
+    """Password clipboard path mirrors connect() — same UX before the prompt."""
+    copied: list[str] = []
+    monkeypatch.setattr("app.ssh.has_sftp", lambda: True)
+    monkeypatch.setattr("app.ssh.pyperclip.copy", lambda pw: copied.append(pw))
+    monkeypatch.setattr("app.ssh.subprocess.call", lambda command: 0)
+
+    server = Server(name="h", host="h.example", username="u", password="s3cret")
+    sftp_session(server)
+
+    assert copied == ["s3cret"]

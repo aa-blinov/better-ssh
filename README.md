@@ -19,6 +19,7 @@ A command-line tool for managing SSH connections with an interactive interface, 
   - [Server Notes, Tags, and Keep-Alive](#server-notes-tags-and-keep-alive)
   - [Port Forwarding](#port-forwarding)
   - [File Transfer (put / get)](#file-transfer-put--get)
+  - [Interactive SFTP Session](#interactive-sftp-session)
   - [Pre- and Post-Connect Hooks](#pre--and-post-connect-hooks)
   - [Environment Variables](#environment-variables)
   - [X11 Forwarding](#x11-forwarding)
@@ -189,6 +190,7 @@ Commands:
   put                 Upload a local file/dir (scp).
   recent              Show recently used servers.     Alias: r
   remove              Remove a server.                Alias: rm
+  sftp                Open an interactive SFTP session.
   show-pass           Show password.                  Alias: sp
   unpin               Remove a server from pinned favorites.
   view                Show a detailed card for a server. Alias: v
@@ -369,9 +371,33 @@ Flag reference:
 Notes:
 
 - Port forwards (`-L`/`-R`/`-D`) and X11 on the server profile are **not** applied to transfers — they're connection-only settings.
-- Password authentication prompts come from OpenSSH itself; `bssh`'s clipboard copy is only wired into `bssh connect`, not put/get.
+- Password authentication prompts come from OpenSSH itself; `bssh`'s clipboard copy is only wired into `bssh connect` and `bssh sftp`, not `put`/`get`.
 - ProxyJump uses the server's stored `jump_host` chain, same as `connect`.
 - Requires `scp` on PATH (shipped with OpenSSH client tools). Missing binary -> exit code 127.
+
+### Interactive SFTP Session
+
+`bssh put` / `bssh get` work great when you already know the remote path. When you don't — you want to browse, list, grab a few files — drop into a full SFTP session via `bssh sftp`:
+
+```bash
+bssh sftp                  # pick from the interactive menu
+bssh sftp prod-db          # go straight to this server
+bssh sftp prod-db --no-copy  # skip the password-to-clipboard copy
+```
+
+Then you're at the `sftp>` prompt:
+
+```text
+sftp> cd /var/log
+sftp> ls -la
+sftp> get app.log
+sftp> put ./local-patch.sh /tmp/
+sftp> bye
+```
+
+The session reuses the server's full profile — port, key, certificate, jump-host chain, keep-alive — and honors the same **pre / post-connect hooks** `bssh connect` does. So a VPN-up hook, an `aws sso login` refresh, or an sshfs mount that you configured for a server runs here too. Forwards / X11 / SetEnv are connection-oriented features and don't apply to sftp.
+
+Requires the `sftp` binary on PATH (shipped with the OpenSSH client package). Missing binary exits with rc=127.
 
 ### Pre- and Post-Connect Hooks
 
