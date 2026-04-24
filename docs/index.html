@@ -26,8 +26,8 @@
     <p class="tagline">Remember your servers, not their arguments.</p>
     <p class="lede">
       A thin layer over OpenSSH that stores everything you would otherwise keep
-      in a scratchpad — hosts, jump chains, port forwards, passwords, pre/post hooks —
-      and gives you back <code>bssh</code>.
+      in a scratchpad — hosts, jump chains, port forwards, passwords, file
+      transfers, pre/post hooks — and gives you back <code>bssh</code>.
     </p>
     <div class="install-box" id="installBox">
       <code id="installCmd">uv tool install git+https://github.com/aa-blinov/better-ssh.git@v0.2.0</code>
@@ -150,6 +150,15 @@
           Every destructive op has a non-interactive flag
           (<code>--yes</code>, <code>--force</code>, <code>--skip</code>).
           Exit codes match Unix convention. Output stays terminal-width friendly.
+        </p>
+      </article>
+      <article class="feature-card">
+        <h3>File transfer, batteries included</h3>
+        <p>
+          <code>bssh put</code> and <code>bssh get</code> for one-shot transfers.
+          <code>bssh sftp</code> drops into an interactive session when you need
+          to browse first. Jump chain, port, key — all inherited from the
+          server profile, nothing retyped.
         </p>
       </article>
     </div>
