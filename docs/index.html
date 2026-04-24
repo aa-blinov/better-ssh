@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="better-ssh is a CLI that remembers your servers so you don't have to retype ssh -J bastion user@host -p 2222 -i ~/.ssh/custom_key for the hundredth time.">
+  <meta property="og:title" content="better-ssh — Remember your servers, not their arguments">
+  <meta property="og:description" content="A friendlier layer over OpenSSH: interactive picker, encrypted password clipboard, jump-host chains, parallel exec, and everything else you used to keep in a scratchpad.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://aa-blinov.github.io/better-ssh/">
+  <title>better-ssh — Remember your servers, not their arguments</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <a href="#" class="brand">better-ssh</a>
+    <div class="topnav-links">
+      <a href="https://github.com/aa-blinov/better-ssh">GitHub</a>
+      <a href="https://github.com/aa-blinov/better-ssh/releases/latest">Releases</a>
+      <a href="https://github.com/aa-blinov/better-ssh#readme">Docs</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <h1><span class="mono">better-ssh</span></h1>
+    <p class="tagline">Remember your servers, not their arguments.</p>
+    <p class="lede">
+      A thin layer over OpenSSH that stores everything you would otherwise keep
+      in a scratchpad — hosts, jump chains, port forwards, passwords, pre/post hooks —
+      and gives you back <code>bssh</code>.
+    </p>
+    <div class="install-box" id="installBox">
+      <code id="installCmd">uv tool install git+https://github.com/aa-blinov/better-ssh.git@v0.2.0</code>
+      <button class="copy-btn" data-target="installCmd" aria-label="Copy install command">Copy</button>
+    </div>
+    <p class="prereq">Requires Python 3.12+ and an OpenSSH client.</p>
+  </header>
+
+  <section class="problem">
+    <h2>The SSH config-file arms race</h2>
+    <p>
+      If you connect to more than a handful of servers, you've felt this. IPs live in a
+      Notion page. Passwords live in a password manager that you manually paste into the
+      terminal. Jump hosts get re-typed. Port forwards get forgotten between sessions.
+      Your shell history fills up with command fragments you stitched together last time.
+    </p>
+    <p>
+      <code>~/.ssh/config</code> helps — until you need more than what ssh_config can
+      express: a password that stays encrypted on disk, port forwards attached to the
+      server (not per invocation), or a local <code>aws sso login</code> that has to run
+      before every connect.
+    </p>
+  </section>
+
+  <section class="shift">
+    <h2>Before / after</h2>
+    <div class="shift-grid">
+      <div class="shift-col">
+        <h3>Today</h3>
+<pre class="shell"><span class="prompt">$</span> <span class="cmt"># which server was that again?</span>
+<span class="prompt">$</span> <span class="cmt"># let me open 1Password…</span>
+<span class="prompt">$</span> ssh -J bastion_ops \
+    deploy@prod-db.internal \
+    -p 2222 \
+    -i ~/.ssh/work_ed25519 \
+    -L 5432:localhost:5432
+<span class="cmt"># paste password from clipboard</span>
+<span class="cmt"># it's always a login shell for this one</span></pre>
+      </div>
+      <div class="shift-arrow" aria-hidden="true">→</div>
+      <div class="shift-col">
+        <h3>With better-ssh</h3>
+<pre class="shell"><span class="prompt">$</span> bssh prod-db
+<span class="out">Password copied to clipboard.</span>
+<span class="out">SSH: ssh -p 2222 -J deploy@bastion:22
+  -L 5432:localhost:5432
+  -i /home/u/.ssh/work_ed25519
+  deploy@prod-db.internal</span>
+<span class="cmt"># paste, done.</span></pre>
+      </div>
+    </div>
+    <p class="shift-caption">
+      Same OpenSSH under the hood. <code>better-ssh</code> just stores what you'd
+      otherwise keep in your head.
+    </p>
+  </section>
+
+  <section class="features">
+    <h2>What you get</h2>
+    <div class="features-grid">
+      <article class="feature-card">
+        <h3>Interactive picker</h3>
+        <p>
+          Fuzzy search across names, tags, and hosts. Recent connections bubble
+          to the top. Pin the ones you hit daily.
+        </p>
+      </article>
+      <article class="feature-card">
+        <h3>Encrypted password clipboard</h3>
+        <p>
+          Optional Fernet encryption keyed to your SSH private key
+          (PBKDF2-HMAC-SHA256, per-installation salt). Copied to clipboard on
+          connect, never injected into the process list.
+        </p>
+      </article>
+      <article class="feature-card">
+        <h3>Jump-host chains baked in</h3>
+        <p>
+          <code>--jump bastion</code> once, and <code>bssh</code> rebuilds the
+          full <code>-J</code> chain on every connect. Multi-hop bastions,
+          cycle detection, and cascade cleanup on removal all handled.
+        </p>
+      </article>
+      <article class="feature-card">
+        <h3>Port forwards as server profile</h3>
+        <p>
+          <code>-L</code>, <code>-R</code>, and dynamic SOCKS
+          <code>-D</code> stored per-server. No more <kbd>↑</kbd>-hunting for
+          the forward spec you built last week.
+        </p>
+      </article>
+      <article class="feature-card">
+        <h3>Parallel command broadcast</h3>
+        <p>
+          <code>bssh exec "uptime" prod</code> runs concurrently across every
+          matched host with per-host colored output and an aggregated pass/fail
+          summary. Scales to low hundreds.
+        </p>
+      </article>
+      <article class="feature-card">
+        <h3>Pre- and post-connect hooks</h3>
+        <p>
+          Bring a VPN up before each connect. Mount <code>sshfs</code> and
+          unmount on exit. Refresh an AWS SSO token. Local shell, runs around
+          ssh itself.
+        </p>
+      </article>
+      <article class="feature-card">
+        <h3>SSH config round-trip</h3>
+        <p>
+          <code>bssh isc</code> imports your existing
+          <code>~/.ssh/config</code> via <code>ssh -G</code>.
+          <code>bssh esc</code> writes it back out as
+          <code>Host</code> blocks other tooling can read.
+        </p>
+      </article>
+      <article class="feature-card">
+        <h3>Scripts-friendly by design</h3>
+        <p>
+          Every destructive op has a non-interactive flag
+          (<code>--yes</code>, <code>--force</code>, <code>--skip</code>).
+          Exit codes match Unix convention. Output stays terminal-width friendly.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section class="audience">
+    <h2>Who is this for?</h2>
+    <ul>
+      <li>Developers juggling dev / staging / prod across several clients or VPS providers</li>
+      <li>SREs managing fleets of tens to low-hundreds of hosts</li>
+      <li>Anyone whose <code>~/.ssh/config</code> is longer than their <code>~/.bashrc</code></li>
+      <li>Anyone still pasting passwords from a password manager into terminals</li>
+    </ul>
+    <p class="aside">
+      If you have three servers and your muscle memory already covers them, <code>ssh</code>
+      is still the right tool. No shame in it.
+    </p>
+  </section>
+
+  <section class="getstarted">
+    <h2>Get started</h2>
+    <p>Install (wheel from the latest release):</p>
+    <div class="install-box">
+      <code id="installCmd2">uv tool install git+https://github.com/aa-blinov/better-ssh.git@v0.2.0</code>
+      <button class="copy-btn" data-target="installCmd2" aria-label="Copy install command">Copy</button>
+    </div>
+    <p>Import what you already have and go:</p>
+<pre class="shell"><span class="prompt">$</span> bssh isc                    <span class="cmt"># imports ~/.ssh/config</span>
+<span class="prompt">$</span> bssh                        <span class="cmt"># interactive picker</span>
+<span class="prompt">$</span> bssh prod-db                <span class="cmt"># direct connect when the query is unique</span>
+<span class="prompt">$</span> bssh exec "uptime" prod     <span class="cmt"># one command, every matching host</span></pre>
+    <p class="aside">
+      Full reference — every command, every flag, every edge case —
+      lives in the <a href="https://github.com/aa-blinov/better-ssh#readme">README</a>.
+    </p>
+  </section>
+
+  <footer class="sitefooter">
+    <div class="foot-row">
+      <span>
+        <a href="https://github.com/aa-blinov/better-ssh">github.com/aa-blinov/better-ssh</a>
+        ·
+        <a href="https://github.com/aa-blinov/better-ssh/blob/master/LICENSE">MIT</a>
+        ·
+        <a href="https://github.com/aa-blinov/better-ssh/blob/master/CHANGELOG.md">CHANGELOG</a>
+      </span>
+    </div>
+    <div class="foot-row small">
+      Open source. Beta. Windows · macOS · Linux.
+    </div>
+  </footer>
+
+  <script>
+    // Copy-to-clipboard for install boxes. Falls back to selecting the text
+    // if the async Clipboard API is unavailable (file://, very old browsers).
+    document.querySelectorAll('.copy-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var target = document.getElementById(btn.dataset.target);
+        if (!target) return;
+        var text = target.textContent;
+        var done = function() {
+          var original = btn.textContent;
+          btn.textContent = 'Copied';
+          btn.classList.add('copied');
+          setTimeout(function() {
+            btn.textContent = original;
+            btn.classList.remove('copied');
+          }, 1400);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, function() {
+            /* ignore */
+          });
+        } else {
+          var range = document.createRange();
+          range.selectNode(target);
+          window.getSelection().removeAllRanges();
+          window.getSelection().addRange(range);
+          try { document.execCommand('copy'); done(); } catch (e) { /* ignore */ }
+        }
+      });
+    });
+  </script>
+</body>
+</html>
