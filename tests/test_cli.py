@@ -3319,6 +3319,72 @@ def test_remove_cascade_cancel_keeps_everything(
     assert t1.jump_host == "Bastion"
 
 
+def test_remove_yes_flag_skips_all_confirms(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh rm <name> -y` removes + cascades without any interactive prompts."""
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="T1", host="t1.example", username="u", jump_host="Bastion"),
+        ]
+    )
+
+    def fail_confirm(*a, **kw):
+        raise AssertionError("-y must skip every confirmation prompt")
+
+    monkeypatch.setattr("app.cli.typer.confirm", fail_confirm)
+
+    result = runner.invoke(app, ["rm", "Bastion", "-y"])
+
+    assert result.exit_code == 0
+    remaining = {s.name: s for s in load_servers()}
+    assert "Bastion" not in remaining  # target gone
+    assert remaining["T1"].jump_host is None  # dependents unlinked
+
+
+def test_remove_success_message_names_the_removed_server(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test the success line mentions the removed server by name (not a bare "Removed").
+
+    Previously, when the target had dependents, the message only said
+    'Cleared jump_host on N dependent server(s)' which read like only
+    references were touched, not the server itself.
+    """
+    save_servers(
+        [
+            Server(id="b-1", name="Bastion", host="b.example", username="ops"),
+            Server(id="t-1", name="T1", host="t1.example", username="u", jump_host="Bastion"),
+        ]
+    )
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: True)
+
+    result = runner.invoke(app, ["rm", "Bastion"])
+
+    assert result.exit_code == 0
+    # Success line must name the target AND mention the dependent cleanup
+    assert "Removed 'Bastion'" in result.output
+    assert "dependent" in result.output
+
+
+def test_remove_simple_success_message_names_the_server(
+    cli_with_servers: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test the non-dependents success path also names the removed server."""
+    monkeypatch.setattr("app.cli.typer.confirm", lambda *a, **kw: True)
+
+    result = cli_with_servers.invoke(app, ["rm", "TestServer3"])
+
+    assert result.exit_code == 0
+    assert "Removed 'TestServer3'" in result.output
+
+
 def test_add_rejects_duplicate_name(
     runner: CliRunner,
     temp_config_dir: Path,

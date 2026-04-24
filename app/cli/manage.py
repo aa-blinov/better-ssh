@@ -572,7 +572,15 @@ def edit(
 
 @app.command("remove", help="Remove a server. Alias: rm")
 @app.command("rm", hidden=True)
-def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+def remove(
+    query: str | None = typer.Argument(None, help="ID/name/partial name (optional)"),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Auto-confirm the removal and jump-host cleanup (for scripts / CI).",
+    ),
+):
     """Remove a server."""
     if query is None:
         servers = storage.load_servers()
@@ -590,7 +598,7 @@ def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (
     dependents = [s for s in all_servers if s.jump_host == srv.name and s.id != srv.id]
 
     try:
-        if not typer.confirm(f"Remove '{srv.name}' ({srv.username}@{srv.host}:{srv.port})?"):
+        if not yes and not typer.confirm(f"Remove '{srv.name}' ({srv.username}@{srv.host}:{srv.port})?"):
             raise typer.Exit(0)
 
         if dependents:
@@ -599,7 +607,7 @@ def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (
                 f"[yellow]Warning:[/yellow] {len(dependents)} {label} "
                 f"this as a jump host: [cyan]{escape(', '.join(s.name for s in dependents))}[/cyan]"
             )
-            if not typer.confirm(
+            if not yes and not typer.confirm(
                 "Clear jump_host on those servers so they connect directly?",
                 default=True,
             ):
@@ -610,12 +618,19 @@ def remove(query: str | None = typer.Argument(None, help="ID/name/partial name (
                 if dep.jump_host == srv.name:
                     dep.jump_host = None
             storage.save_servers(remaining)
-            console.print(f"[green]Removed.[/green] Cleared jump_host on {len(dependents)} dependent server(s).")
+            # Previously only said "Cleared jump_host on N dependent(s)" —
+            # which read as "only references cleared, target still exists".
+            # Now spell out both actions: the target IS gone and the
+            # referencing servers were unlinked.
+            console.print(
+                f"[green]Removed '{escape(srv.name)}'.[/green] "
+                f"Cleared jump_host on {len(dependents)} dependent server(s)."
+            )
             return
 
         ok = storage.remove_server(srv.id)
         if ok:
-            console.print("[green]Removed.[/green]")
+            console.print(f"[green]Removed '{escape(srv.name)}'.[/green]")
         else:
             console.print("[yellow]Nothing to remove.[/yellow]")
     except (KeyboardInterrupt, typer.Abort):
