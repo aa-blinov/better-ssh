@@ -91,11 +91,11 @@ uv run ruff format app
 ```python
 def connect(server: Server, copy_password: bool = True) -> int:
     """Connect to SSH server. Returns exit code.
-    
+
     Args:
         server: Server configuration object
         copy_password: Whether to copy password to clipboard
-        
+
     Returns:
         SSH command exit code (0 for success)
     """

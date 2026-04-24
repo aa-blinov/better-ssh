@@ -1,0 +1,28 @@
+# Hooks run on every `git commit` once installed via `uv run pre-commit install`.
+# The same hooks run on every PR via pre-commit.ci (https://pre-commit.ci) once
+# the repo is enabled there — the bot auto-fixes formattable issues and bumps
+# hook versions weekly via dependabot-style PRs.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # Ruff: same linter + formatter CI uses. Pinning rev here decouples the
+  # hook from the runtime dep in pyproject.toml; pre-commit.ci bumps it
+  # automatically on its weekly autoupdate cadence.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
