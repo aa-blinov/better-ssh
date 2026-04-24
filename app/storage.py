@@ -11,6 +11,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.fernet import InvalidToken
 from platformdirs import user_config_dir
 
+from .domain import servers_matching_query
 from .encryption import decrypt_password, encrypt_password, is_encrypted
 from .models import Server
 
@@ -152,7 +153,22 @@ def set_server_favorite(server_id: str, favorite: bool) -> bool:
 
 
 def find_server(query: str, servers: list[Server] | None = None) -> Server | None:
-    """Find server by ID/prefix, exact name, or partial name match."""
+    """Find a single server that unambiguously matches the query.
+
+    Match order (first unique hit wins):
+      1. exact id
+      2. unique id prefix
+      3. exact name (case-insensitive)
+      4. unique broad match — same fields that `bssh ls <query>` filters by
+         (name / host / username / tags / jump_host, all case-insensitive
+         substrings; id by prefix)
+
+    Returns None when the query is ambiguous (multiple candidates at the
+    broad-match stage) or has no matches — callers fall back to a picker
+    or report a "not found" error accordingly. Aligning the uniqueness
+    check with the `ls` semantics keeps `bssh connect prod` consistent
+    with `bssh ls prod`.
+    """
     if servers is None:
         servers = load_servers()
     # exact id
@@ -163,12 +179,13 @@ def find_server(query: str, servers: list[Server] | None = None) -> Server | Non
     prefix_matches = [s for s in servers if s.id.startswith(query)]
     if len(prefix_matches) == 1:
         return prefix_matches[0]
-    # case-insensitive unique name
-    matches = [s for s in servers if s.name.lower() == query.lower()]
-    if len(matches) == 1:
-        return matches[0]
-    # partial name contains
-    contains = [s for s in servers if query.lower() in s.name.lower()]
-    if len(contains) == 1:
-        return contains[0]
+    # case-insensitive exact name (name uniqueness is enforced at add/edit,
+    # so this is always 0 or 1 — the for-else pattern keeps it O(n))
+    for s in servers:
+        if s.name.lower() == query.lower():
+            return s
+    # unique broad match across name/host/user/tag/jump_host
+    broad = servers_matching_query(servers, query)
+    if len(broad) == 1:
+        return broad[0]
     return None

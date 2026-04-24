@@ -340,3 +340,50 @@ def test_find_server_unique_partial(servers_json_file: Path):
     found = find_server("Server3")  # unique partial - only TestServer3 matches
     assert found is not None
     assert found.name == "TestServer3"
+
+
+def test_find_server_unique_match_by_username(servers_json_file: Path):
+    """Test broad match: a unique username substring resolves to that server.
+
+    Sample fixture: only TestServer1 has username 'admin' → should resolve.
+    Before the broad-match unification this returned None (find_server only
+    searched id/name), so `bssh connect admin` fell through to the picker
+    while `bssh ls admin` showed the match.
+    """
+    found = find_server("admin")
+    assert found is not None
+    assert found.name == "TestServer1"
+
+
+def test_find_server_unique_match_by_tag(servers_json_file: Path):
+    """Test broad match: a unique tag substring resolves to that server.
+
+    Sample fixture: only TestServer2 has tag 'dev' → should resolve.
+    """
+    found = find_server("dev")
+    assert found is not None
+    assert found.name == "TestServer2"
+
+
+def test_find_server_unique_match_by_host(servers_json_file: Path):
+    """Test broad match: a unique host substring resolves to that server."""
+    # Only TestServer3 has 'example.com' as host
+    found = find_server("example.com")
+    assert found is not None
+    assert found.name == "TestServer3"
+
+
+def test_find_server_ambiguous_broad_match_returns_none(temp_config_dir: Path):
+    """Test that a query matching multiple servers via any broad field returns None.
+
+    Caller falls back to a picker over the ambiguous candidates. Here 'prod'
+    matches one server by name and another by tag.
+    """
+    save_servers(
+        [
+            Server(id="a", name="production-db", host="p.example", username="u", tags=[]),
+            Server(id="b", name="staging", host="s.example", username="u", tags=["prod-critical"]),
+        ]
+    )
+    found = find_server("prod")
+    assert found is None  # ambiguous across name and tag, picker path triggers
