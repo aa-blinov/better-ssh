@@ -1,0 +1,31 @@
+# Dependabot keeps GitHub Actions versions and Python dependencies from
+# drifting silently. Grouping minor+patch updates into a single PR per
+# ecosystem avoids per-dep PR spam while keeping the diff auditable.
+# See https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # GitHub Actions used in .github/workflows/*.yml
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # Python dependencies declared in pyproject.toml (read by uv)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # Bundle minor + patch bumps into a single weekly PR so the feed
+      # stays readable. Major bumps fall through the group filter and
+      # each gets its own PR — breaking changes deserve isolated review.
+      python-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
