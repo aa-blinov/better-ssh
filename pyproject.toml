@@ -1,6 +1,6 @@
 [project]
 name = "better-ssh"
-version = "0.2.0"
+version = "0.3.0"
 description = "CLI tool for managing SSH connections with interactive menu and password management"
 readme = "README.md"
 requires-python = ">=3.12"
