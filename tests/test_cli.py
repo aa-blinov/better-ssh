@@ -57,21 +57,21 @@ def test_root_invocation_opens_connect_flow(runner: CliRunner, monkeypatch: pyte
     """Test running CLI without subcommand delegates to connect flow."""
     calls: list[tuple[str | None, bool]] = []
 
-    def fake_connect_cmd(query: str | None = None, no_copy: bool = False):
-        calls.append((query, no_copy))
+    def fake_connect_cmd(query: str | None = None, copy: bool = True):
+        calls.append((query, copy))
 
     monkeypatch.setattr("app.cli.connection.connect_cmd", fake_connect_cmd)
 
     result = runner.invoke(app, [])
 
     assert result.exit_code == 0
-    assert calls == [(None, False)]
+    assert calls == [(None, True)]
 
 
 def test_root_invocation_propagates_connect_exit_code(runner: CliRunner, monkeypatch: pytest.MonkeyPatch):
     """Test default root flow preserves the connect command exit code."""
 
-    def fake_connect_cmd(query: str | None = None, no_copy: bool = False):
+    def fake_connect_cmd(query: str | None = None, copy: bool = True):
         raise typer.Exit(7)
 
     monkeypatch.setattr("app.cli.connection.connect_cmd", fake_connect_cmd)
@@ -85,7 +85,7 @@ def test_help_does_not_trigger_default_connect(runner: CliRunner, monkeypatch: p
     """Test help path does not open the default connect flow."""
     called = False
 
-    def fake_connect_cmd(query: str | None = None, no_copy: bool = False):
+    def fake_connect_cmd(query: str | None = None, copy: bool = True):
         nonlocal called
         called = True
 
@@ -3521,6 +3521,42 @@ def test_connect_records_use_only_on_success(
 
     updated = next(s for s in load_servers() if s.id == "test-id-001")
     assert updated.use_count == 1  # recorded for rc=130
+
+
+def test_connect_default_copies_password(
+    cli_with_servers: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh connect <name>` without flags uses copy_password=True (default)."""
+    captured: list[bool] = []
+
+    def fake_connect(srv, copy_password=True, all_servers=None):
+        captured.append(copy_password)
+        return 0
+
+    monkeypatch.setattr("app.cli.connection.connect", fake_connect)
+
+    cli_with_servers.invoke(app, ["connect", "TestServer1"])
+
+    assert captured == [True]
+
+
+def test_connect_no_copy_flag_disables_clipboard(
+    cli_with_servers: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test `bssh connect <name> --no-copy` passes copy_password=False (backward-compat)."""
+    captured: list[bool] = []
+
+    def fake_connect(srv, copy_password=True, all_servers=None):
+        captured.append(copy_password)
+        return 0
+
+    monkeypatch.setattr("app.cli.connection.connect", fake_connect)
+
+    cli_with_servers.invoke(app, ["connect", "TestServer1", "--no-copy"])
+
+    assert captured == [False]
 
 
 def test_remove_cancel_confirmation_exits_cleanly(cli_with_servers: CliRunner, monkeypatch: pytest.MonkeyPatch):

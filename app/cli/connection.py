@@ -18,14 +18,18 @@ def root(ctx: typer.Context) -> None:
     """Open the connect flow when the CLI is run without a subcommand."""
     if ctx.resilient_parsing or ctx.invoked_subcommand is not None:
         return
-    connect_cmd(query=None, no_copy=False)
+    connect_cmd(query=None, copy=True)
 
 
 @app.command("connect", help="Connect to a server. Alias: c")
 @app.command("c", hidden=True)
 def connect_cmd(
     query: str | None = typer.Argument(None, help="ID/name/partial name (optional)"),
-    no_copy: bool = typer.Option(False, help="Don't copy password"),
+    copy: bool = typer.Option(
+        True,
+        "--copy/--no-copy",
+        help="Copy the server's password to clipboard before launching ssh (disable with --no-copy).",
+    ),
 ):
     """Connect to a server."""
     servers = storage.load_servers()
@@ -44,7 +48,7 @@ def connect_cmd(
             else:
                 srv = _select_server(servers, f"No direct match for '{query}'. Select server to connect:")
 
-    rc = connect(srv, copy_password=not no_copy, all_servers=servers)
+    rc = connect(srv, copy_password=copy, all_servers=servers)
     if rc in (0, 130):
         storage.record_server_use(srv.id)
     raise typer.Exit(rc)
