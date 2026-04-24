@@ -24,7 +24,7 @@ def root(ctx: typer.Context) -> None:
 @app.command("connect", help="Connect to a server. Alias: c")
 @app.command("c", hidden=True)
 def connect_cmd(
-    query: str | None = typer.Argument(None, help="ID/name/partial name (optional)"),
+    query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
     copy: bool = typer.Option(
         True,
         "--copy/--no-copy",
@@ -56,7 +56,9 @@ def connect_cmd(
 
 @app.command("copy-pass", help="Copy password to clipboard. Alias: cp")
 @app.command("cp", hidden=True)
-def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+def copy_pass(
+    query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
+):
     """Copy password to clipboard."""
     if query is None:
         servers = storage.load_servers()
@@ -94,7 +96,9 @@ def copy_pass(query: str | None = typer.Argument(None, help="ID/name/partial nam
 
 @app.command("show-pass", help="Show password. Alias: sp")
 @app.command("sp", hidden=True)
-def show_pass(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+def show_pass(
+    query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
+):
     """Show password."""
     if query is None:
         servers = storage.load_servers()

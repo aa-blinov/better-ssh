@@ -16,7 +16,9 @@ from ._shared import _print_no_servers_message, _select_server, app, console
 
 @app.command("ping", help="Check server availability. Alias: p")
 @app.command("p", hidden=True)
-def ping_server(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+def ping_server(
+    query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
+):
     """Check if server is reachable on SSH port."""
     if query is None:
         servers = storage.load_servers()

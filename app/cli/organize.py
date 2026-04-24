@@ -62,7 +62,9 @@ def list_servers(
 
 
 @app.command("pin", help="Pin a server to the top of lists.")
-def pin_server(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+def pin_server(
+    query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
+):
     """Pin a server for quick access."""
     if query is None:
         servers = storage.load_servers()
@@ -88,7 +90,9 @@ def pin_server(query: str | None = typer.Argument(None, help="ID/name/partial na
 
 
 @app.command("unpin", help="Remove a server from pinned favorites.")
-def unpin_server(query: str | None = typer.Argument(None, help="ID/name/partial name (optional)")):
+def unpin_server(
+    query: str | None = typer.Argument(None, help="Server id or substring (optional; matches name/host/user/tag/jump)"),
+):
     """Remove a server from favorites."""
     if query is None:
         servers = [server for server in storage.load_servers() if server.favorite]
