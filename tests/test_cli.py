@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -1270,6 +1271,58 @@ def test_health_command_empty_state(
 
     assert result.exit_code == 1
     assert "No servers found" in result.stdout
+
+
+def test_health_command_probes_servers_in_parallel(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test health probes run concurrently, not sequentially.
+
+    With 4 servers and a 0.3s sleep per probe, serial execution would take
+    ~1.2s. Parallel execution via asyncio.to_thread should finish in ~0.3s
+    plus scheduling overhead. We assert < 1s to leave slack for CI jitter
+    while still catching a full regression to serial.
+    """
+    save_servers([Server(id=f"p-{i}", name=f"H{i}", host=f"h{i}.example", username="u") for i in range(4)])
+
+    def slow_check(server, **kw):
+        time.sleep(0.3)
+        return (True, "reachable", 300.0)
+
+    monkeypatch.setattr("app.cli.health.check_server_availability", slow_check)
+
+    start = time.perf_counter()
+    result = runner.invoke(app, ["health"])
+    elapsed = time.perf_counter() - start
+
+    assert result.exit_code == 0
+    assert "4/4 servers available" in result.stdout
+    # Serial would be ~1.2s; parallel should be well under 1s
+    assert elapsed < 1.0, f"health ran serially — elapsed {elapsed:.2f}s"
+
+
+def test_health_command_timeout_flag_is_passed_to_probe(
+    runner: CliRunner,
+    temp_config_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Test --timeout is forwarded to check_server_availability."""
+    save_servers([Server(id="p-1", name="H", host="h.example", username="u")])
+
+    captured_timeouts: list[float] = []
+
+    def spy(server, **kw):
+        captured_timeouts.append(kw.get("timeout", -1))
+        return (True, "reachable", 5.0)
+
+    monkeypatch.setattr("app.cli.health.check_server_availability", spy)
+
+    result = runner.invoke(app, ["health", "--timeout", "2.5"])
+
+    assert result.exit_code == 0
+    assert captured_timeouts == [2.5]
 
 
 def test_view_shows_all_fields_for_server(
