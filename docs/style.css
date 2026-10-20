@@ -355,6 +355,13 @@ img {
   margin-bottom: var(--gap-xs);
 }
 
+/* A rail inside a section. The list rules above are more specific than the
+   rail rules, so without this the rail is indented and capped. */
+.section .rail {
+  max-width: none;
+  padding-left: 0;
+}
+
 .rail {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -362,6 +369,19 @@ img {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+/* A section that comes in when it scrolls into view. The rule is scoped to
+   the js class, so a page whose script did not load shows everything. */
+.js .reveal {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 400ms ease, transform 400ms ease;
+}
+
+.js .reveal.is-visible {
+  opacity: 1;
+  transform: none;
 }
 
 .rail h3 {
