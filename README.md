@@ -1,122 +1,60 @@
 # better-ssh
 
+A command-line tool for managing SSH connections with an interactive interface, password management, and optional encryption. Every server keeps its jump chain, port forwards, environment variables and hooks, so a connection is one word instead of a long `ssh` line. Underneath, it drives the OpenSSH client that is already on the machine.
+
 [![Website](https://img.shields.io/badge/website-aa--blinov.github.io%2Fbetter--ssh-0ea5e9?logo=github)](https://aa-blinov.github.io/better-ssh/)
 [![Tests](https://github.com/aa-blinov/better-ssh/actions/workflows/tests.yml/badge.svg)](https://github.com/aa-blinov/better-ssh/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/aa-blinov/better-ssh/branch/master/graph/badge.svg)](https://codecov.io/gh/aa-blinov/better-ssh)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A command-line tool for managing SSH connections with an interactive interface, password management, and optional encryption.
+---
 
-## Table of Contents
+## Quick start
 
-- [Overview](#overview)
-- [Features](#features)
-- [Installation](#installation)
-- [Usage](#usage)
-  - [Filtering the Server List](#filtering-the-server-list)
-  - [Adding Servers Non-Interactively](#adding-servers-non-interactively)
-  - [Server Notes, Tags, and Keep-Alive](#server-notes-tags-and-keep-alive)
-  - [Port Forwarding](#port-forwarding)
-  - [File Transfer (put / get)](#file-transfer-put--get)
-  - [Interactive SFTP Session](#interactive-sftp-session)
-  - [Pre- and Post-Connect Hooks](#pre--and-post-connect-hooks)
-  - [Environment Variables](#environment-variables)
-  - [X11 Forwarding](#x11-forwarding)
-  - [Parallel Command Broadcast](#parallel-command-broadcast)
-  - [Exporting Back to SSH Config](#exporting-back-to-ssh-config)
-  - [Viewing a Single Server](#viewing-a-single-server)
-- [Jump Hosts (ProxyJump)](#jump-hosts-proxyjump)
-- [Configuration](#configuration)
-- [Password Encryption](#password-encryption)
-- [Platform Support](#platform-support)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Overview
-
-better-ssh simplifies SSH connection management by providing an interactive terminal interface for selecting and connecting to servers. It supports password storage with optional SSH key-based encryption, automatic password clipboard integration, and works across Windows, macOS, and Linux.
-
-## Features
-
-- Interactive server selection menu with search capabilities
-- Pinned favorites that stay above recent history
-- Interactive menus prioritize recently used servers automatically
-- Import existing hosts from `~/.ssh/config`
-- Password storage with optional SSH key-based encryption
-- Automatic password clipboard integration
-- Support for SSH private key and certificate authentication
-- ProxyJump support — connect through a bastion host (or a chain of hosts)
-- Optional SSH keep-alive per server (ServerAliveInterval)
-- Per-server port forwarding presets (local `-L`, remote `-R`, dynamic SOCKS `-D`)
-- Optional X11 forwarding per server (`ssh -X`)
-- Per-server environment variables pushed to the remote session (`ssh -o SetEnv`)
-- Pre- and post-connect shell hooks per server (VPN setup, cleanup, notifications)
-- File transfer (`bssh put` / `bssh get`) that reuses a server's stored profile
-- Round-trip with OpenSSH config: `bssh isc` imports Host blocks; `bssh esc` exports them back
-- Parallel command broadcast (`bssh exec`) across matched servers with per-host colored output
-- Free-form notes and tags attached to each server
-- Detailed per-server card view (`bssh view <name>`)
-- Time-sorted "recents" list (`bssh recent`) with a relative `Last used` column
-- Server management (add, edit, remove, list)
-- `bssh ls <query>` filter by name, host, user, tag, id prefix, or jump host
-- Server availability checking (ping individual or health check all)
-- Configuration backup and restore (export/import)
-- Cross-platform compatibility (Windows, macOS, Linux)
-- Short command aliases for faster workflow
-- Flexible server identification (by name, partial name, or ID)
-- Non-interactive CLI flags for scripted provisioning
-- Auto-detection of SSH keys in standard locations
-
-## Installation
-
-### Prerequisites
-
-- Python 3.12 or higher
-- [uv](https://github.com/astral-sh/uv) package manager
-- SSH client (OpenSSH)
-
-### Steps
-
-1. Clone the repository:
+Python 3.12 or higher, [uv](https://github.com/astral-sh/uv), and an OpenSSH client.
 
 ```bash
 git clone https://github.com/aa-blinov/better-ssh.git
 cd better-ssh
-```
-
-2. Install as a global tool:
-
-```bash
 uv tool install .
-```
-
-3. Verify installation:
-
-```bash
 bssh --help
 ```
 
-Both `bssh` and `better-ssh` are registered as entry points and work identically.
+`bssh` and `better-ssh` are both registered as entry points and work identically.
 
-For development instead of a global install:
+Then pull in the hosts you already have, and connect:
+
+```bash
+bssh import-ssh-config
+bssh
+```
+
+`bssh` on its own opens the interactive connect menu. `bssh <query>` connects straight away when the query matches exactly one server, and falls back to the menu when the match is ambiguous or missing.
+
+For a development install, from a clone:
 
 ```bash
 uv sync
 uv run bssh --help
 ```
 
-### SSH Client Installation
+Shell completion:
 
-The tool requires a system SSH client.
+```bash
+bssh --install-completion   # install for the current shell
+bssh --show-completion      # preview without installing
+```
+
+### The SSH client
+
+The tool shells out to the system SSH client, so one has to be present.
 
 **Windows:**
 
-```powershell
-# Via Windows Settings
-Settings -> Apps -> Optional Features -> OpenSSH Client
+The client is an optional part of the system. In Windows Settings, go to Apps and add the OpenSSH Client from the optional-feature list, or install it with winget:
 
-# Via winget
+```powershell
 winget install --id Microsoft.OpenSSH.Client -e
 ```
 
@@ -131,95 +69,82 @@ brew install openssh
 **Linux:**
 
 ```bash
-# Ubuntu/Debian
-sudo apt install openssh-client
-
-# Fedora/RHEL
-sudo dnf install openssh-clients
-
-# Arch Linux
-sudo pacman -S openssh
+sudo apt install openssh-client     # Ubuntu, Debian
+sudo dnf install openssh-clients    # Fedora, RHEL
+sudo pacman -S openssh              # Arch
 ```
 
-### Shell Completion
+## What it does
+
+- **Connect from a picker.** `bssh` opens a searchable menu of saved servers, ordered by pinned first, then most recently used, then most used, then name.
+- **Connect with one word.** `bssh prod-db` goes straight through when the query names a single server.
+- **Keep passwords.** Passwords are stored with the server and copied to the clipboard before the SSH client starts, so the password prompt is a paste.
+- **Use a key or a certificate.** A private key path and a certificate path are stored per server and passed to OpenSSH. When a key is added interactively, the first of `~/.ssh/id_ed25519`, `id_rsa`, `id_ecdsa` or `id_dsa` that exists is offered as the default.
+- **Encrypt the stored passwords.** Optional encryption keyed to the SSH private key, with a random per-installation salt. No master password is asked for.
+- **Import the hosts you already have.** `bssh import-ssh-config` reads `~/.ssh/config` through `ssh -G`, so `Host *`, `Include`, and explicit `IdentityFile` and `CertificateFile` are reflected.
+- **Export back to OpenSSH.** `bssh export-ssh-config` writes `Host` blocks that `ssh`, `scp`, `rsync`, `git` and IDEs read directly.
+- **Chain through bastions.** A jump host is another saved server, referenced by name, with cycle detection and cascading cleanup.
+- **Attach port forwards to the server.** Local `-L`, remote `-R` and dynamic SOCKS `-D` presets are stored with the profile and passed on every connect.
+- **Push environment variables.** Per-server variables are sent with OpenSSH's `SetEnv`.
+- **Forward X11.** `ssh -X` on the servers that need it.
+- **Keep the connection alive.** An optional `ServerAliveInterval` per server, for hosts behind a NAT.
+- **Run shell commands around the session.** A pre-connect and a post-connect hook per server, for a VPN, an SSO refresh, or a mount.
+- **Transfer files.** `bssh put` and `bssh get` wrap `scp` and reuse the stored profile. `bssh sftp` opens a full interactive session.
+- **Run one command on many hosts.** `bssh exec` runs it in parallel over every server a query matches, with a per-host prefix and a summary.
+- **Check that a host is up.** `bssh ping` for one server, `bssh health` for all of them at once.
+- **Organize.** Notes, tags, pins, a recents list, a filter that matches on name, host, user, tag, jump host or id prefix, and a detailed card per server.
+- **Script it.** Every prompt has a flag, and every destructive operation has a non-interactive form and a meaningful exit code.
+- **Run it on three operating systems.** Windows 10 and 11, macOS 10.15 and later, and Linux with Python 3.12. Every dependency is cross-platform, and the only external requirement is a system SSH client, which is usually already there on macOS and Linux.
+
+### The command set
+
+| Command | Alias | What it does |
+| --- | --- | --- |
+| `add` | `a` | Add a new server. |
+| `connect` | `c` | Connect to a server. |
+| `copy-pass` | `cp` | Copy password to clipboard. |
+| `decrypt` | `dec` | Disable password encryption. |
+| `edit` | `e` | Edit a server. |
+| `encrypt` | `enc` | Enable password encryption. |
+| `encryption-status` | `es` | Show encryption status. |
+| `exec` | | Run a command on one or more servers in parallel. |
+| `export` | `ex` | Export servers to JSON file. |
+| `export-ssh-config` | `esc` | Export servers to SSH config. |
+| `get` | | Download a remote file/dir (scp). |
+| `health` | `h` | Check all servers availability. |
+| `import` | `im` | Import servers from JSON file. |
+| `import-ssh-config` | `isc` | Import hosts from SSH config. |
+| `list` | `ls` | Show list of servers. |
+| `pin` | | Pin a server to the top of lists. |
+| `ping` | `p` | Check server availability. |
+| `put` | | Upload a local file/dir (scp). |
+| `recent` | `r` | Show recently used servers. |
+| `remove` | `rm` | Remove a server. |
+| `sftp` | | Open an interactive SFTP session. |
+| `show-pass` | `sp` | Show password. |
+| `unpin` | | Remove a server from pinned favorites. |
+| `view` | `v` | Show a detailed card for a server. |
+
+Most commands work without arguments and open an interactive menu. `bssh <command> --help` prints the full help for that command.
+
+### Connecting
 
 ```bash
-bssh --install-completion   # install for current shell
-bssh --show-completion      # preview without installing
+bssh                          # the picker
+bssh prod-db                  # connect when the match is unique
+bssh connect prod-db          # the same thing, spelled out
+bssh connect prod-db --no-copy  # do not touch the clipboard
 ```
 
-## Usage
+For a password-based host, `bssh` copies the saved password to the clipboard before starting OpenSSH. The password is not injected into the `ssh` command line; the SSH client asks for it and you paste it.
 
-### Quick Start
+`bssh connect` exits with the exit code of the SSH client, and 130 when the session is interrupted with Ctrl+C. A connection that ends this way is recorded as a use, so it appears in `bssh recent`.
 
-```bash
-bssh
-bssh <query>
-bssh import-ssh-config
-```
+### Listing, pinning and recents
 
-- `bssh` opens the interactive connect menu immediately
-- `bssh <query>` connects directly when the match is unique
-- `bssh import-ssh-config` bootstraps your saved hosts from `~/.ssh/config`
+`bssh ls` prints a table. Its columns are ID, Pin, Name, Connection and Auth, plus Via, Alive, Fwd, Last used, Tags and Notes when at least one server has a value for them. The ID column shows the first 8 characters of the server id, Notes is cut at 40 characters and Tags at 30.
 
-### Available Commands
-
-```text
-Usage: bssh [OPTIONS] COMMAND [ARGS]...
-
-Better SSH: quick server selection, connection and password management.
-
-Commands:
-  add                 Add a new server.               Alias: a
-  connect             Connect to a server.            Alias: c
-  copy-pass           Copy password to clipboard.     Alias: cp
-  decrypt             Disable password encryption.    Alias: dec
-  edit                Edit a server.                  Alias: e
-  encrypt             Enable password encryption.     Alias: enc
-  encryption-status   Show encryption status.         Alias: es
-  exec                Run a command on one or more servers in parallel.
-  export              Export servers to JSON file.    Alias: ex
-  export-ssh-config   Export servers to SSH config.   Alias: esc
-  get                 Download a remote file/dir (scp).
-  health              Check all servers availability. Alias: h
-  import              Import servers from JSON file.  Alias: im
-  import-ssh-config   Import hosts from SSH config.   Alias: isc
-  list                Show list of servers.           Alias: ls
-  pin                 Pin a server to the top of lists.
-  ping                Check server availability.      Alias: p
-  put                 Upload a local file/dir (scp).
-  recent              Show recently used servers.     Alias: r
-  remove              Remove a server.                Alias: rm
-  sftp                Open an interactive SFTP session.
-  show-pass           Show password.                  Alias: sp
-  unpin               Remove a server from pinned favorites.
-  view                Show a detailed card for a server. Alias: v
-```
-
-Run `bssh` without a subcommand to open the interactive connect menu immediately.
-
-Run `bssh <query>` to connect directly when the match is unique. If the query is ambiguous or missing, the tool falls back to an interactive menu.
-
-Use `bssh pin <query>` to keep critical hosts above the normal recent/frequent ordering, and `bssh unpin <query>` to remove them from favorites.
-
-`bssh recent` (alias `r`) lists servers by most-recently-connected, newest first — independent of pin status. Cap the list with `--limit N` / `-n N` (default 10). Servers that were never connected via `bssh` don't appear. The rendered table includes a `Last used` column with a relative timestamp (`just now`, `5m ago`, `2h ago`, `3d ago`, or an ISO date for anything older than 30 days). The same column is shown in `bssh ls` once at least one server has a recorded connection.
-
-Most commands work without arguments and will present an interactive menu.
-
-`bssh add` walks through the optional fields after Name/Host/Port/Username. Binary/complex fields (SSH key, password, jump host, keep-alive, forwards, env vars, pre/post hooks) use a y/N confirm before asking for the value. Free-text fields (note, tags) use a direct prompt with "(Enter to skip)" — a one-keystroke skip if you don't want one, or just type the value. All of these also have non-interactive flags for scripted use (see [Adding Servers Non-Interactively](#adding-servers-non-interactively)).
-
-For password-based hosts, `bssh` copies the saved password to your clipboard before starting OpenSSH. You still paste it into the SSH password prompt manually; the password is not injected into the `ssh` command automatically.
-
-For detailed help on any command, use `--help`:
-
-```bash
-bssh connect --help
-bssh add --help
-```
-
-### Filtering the Server List
-
-`bssh ls` accepts an optional query that filters the table by substring against name, host, username, tags, jump host, and id prefix (all case-insensitive except the id prefix):
+`bssh ls <query>` filters the table by substring against name, host, username, tags, jump host, and id prefix. Every field is matched case-insensitively, except the id prefix.
 
 ```bash
 bssh ls prod          # matches name/host/user/tag/jump containing "prod"
@@ -227,11 +152,34 @@ bssh ls bastion       # surfaces both the bastion itself and everything routed t
 bssh ls a1b2          # id-prefix match
 ```
 
-When nothing matches, the command prints a single friendly line instead of an empty table. Omitting the query lists everything as before.
+When nothing matches, the command prints a single friendly line instead of an empty table.
 
-### Adding Servers Non-Interactively
+`bssh pin <query>` keeps a host above the normal ordering, and `bssh unpin <query>` takes it back out. A pinned host still sits in its own recent position in `bssh recent`.
 
-Every field `bssh add` prompts for has an equivalent flag, so the full flow can be scripted. Pair with `-s` / `--skip` to suppress the "Add SSH key?", "Add password?", "Use a jump host?" etc. confirms — any field not passed via flag stays unset.
+`bssh recent` (alias `r`) lists servers by most-recently-connected, newest first, independent of pin status. `--limit N` and `-n N` cap the list, default 10. Servers that were never connected through `bssh` do not appear. The `Last used` column shows a relative timestamp: `just now`, `5m ago`, `2h ago`, `3d ago`, or an ISO date for anything older than 30 days. The same column appears in `bssh ls` once at least one server has a recorded connection.
+
+`bssh view <name>` (alias `v`) renders a full card for one server in a panel. Nothing is cut short there: the complete note, the resolved jump chain, and the list of servers that use this one as their jump host. A broken jump-host reference is flagged in red instead of failing quietly.
+
+### Finding a server
+
+Every command that takes a `<query>` (`connect`, `edit`, `view`, `remove`, `pin`, `unpin`, `ping`, `put`, `get`, `copy-pass`, `show-pass`, `ls`, `exec`, `health`) resolves it the same way:
+
+1. Exact server ID
+2. Unique server-ID prefix
+3. Exact name, case-insensitive
+4. Unique broad match: a case-insensitive substring of the name, host, username, any tag, or the jump host
+
+If step 4 finds more than one server, the command opens a picker over the candidates, the same set `bssh ls <query>` would print. If nothing matches at all, it reports that the server was not found.
+
+`bssh ls <query>` and `bssh exec <query>` act on every matching server directly and skip the picker.
+
+Names are unique, case-insensitively. Adding or renaming to a name that is already in use is refused with an error pointing at the existing entry.
+
+### Adding and editing servers
+
+`bssh add` asks for Name, Host, Port and Username, then walks through the optional fields. Binary and complex fields (SSH key, password, jump host, keep-alive, forwards, environment variables, pre and post hooks) use a y/N confirm before the value is asked for. Free-text fields (note, tags) use a direct prompt with "(Enter to skip)", so a stray keystroke does not turn into a yes-or-no question with the text lost.
+
+Every field also has a flag, so the whole flow can be scripted. Pair it with `-s` and `--skip` to suppress the "Add SSH key?", "Add password?", "Use a jump host?" confirms. Any field not passed as a flag stays unset.
 
 ```bash
 # Minimal non-interactive add:
@@ -252,33 +200,31 @@ bssh add \
   -s
 ```
 
-Without `-s`, `bssh add` drops into the interactive confirm sequence for any field you didn't pre-populate, which is friendly for humans but inconvenient for Ansible/Terraform-style runs.
-
-Flag reference:
+Without `-s`, `bssh add` drops into the interactive confirm sequence for any field you did not pre-populate, which is friendly for a person and inconvenient for an Ansible-style run.
 
 | Flag | Short | Purpose |
 | --- | --- | --- |
-| `--key <path>` | — | Path to SSH private key |
-| `--certificate <path>` | — | Path to SSH certificate |
-| `--password <value>` | — | Password (see security note below) |
+| `--key <path>` | | Path to SSH private key |
+| `--certificate <path>` | | Path to SSH certificate |
+| `--password <value>` | | Password (see the security note below) |
 | `--jump <name>` | `-J` | Saved server name to use as ProxyJump (case-insensitive) |
 | `--keep-alive <seconds>` | `-K` | `ServerAliveInterval` in seconds; `0` leaves it disabled |
-| `--notes <text>` | — | Free-form note attached to the server |
+| `--notes <text>` | | Free-form note attached to the server |
 | `--tag <value>` | `-t` | Tag (repeatable: `-t prod -t db`) |
 | `--local-forward <spec>` | `-L` | Local forward, repeatable: `[bind:]port:host:port` |
 | `--remote-forward <spec>` | `-R` | Remote forward, repeatable: `[bind:]port:host:port` |
 | `--dynamic-forward <spec>` | `-D` | Dynamic SOCKS forward, repeatable: `[bind:]port` |
-| `--x11` | — | Enable X11 forwarding (`ssh -X`) |
+| `--x11` | | Enable X11 forwarding (`ssh -X`) |
 | `--env <K=V>` | `-e` | Environment variable pushed via `ssh -o SetEnv` (repeatable) |
-| `--pre <cmd>` | — | Shell command run locally BEFORE each connect (empty string clears) |
-| `--post <cmd>` | — | Shell command run locally AFTER each connect (empty string clears) |
+| `--pre <cmd>` | | Shell command run locally BEFORE each connect (empty string clears) |
+| `--post <cmd>` | | Shell command run locally AFTER each connect (empty string clears) |
 | `--skip` | `-s` | Skip all interactive "Add X?" confirms (provisioning / scripts) |
 
-Passing an empty string (`--key ""`, `--notes ""`) stores `None` — useful when a script wants to be explicit about clearing a field.
+Passing an empty string (`--key ""`, `--notes ""`) stores `None`, which lets a script clear a field on purpose.
 
-> **`--password` security note:** values passed on the command line end up in shell history (e.g. `~/.bash_history`), `/proc/<pid>/cmdline`, and process-listing tools. Prefer the interactive prompt when possible. The flag exists for provisioning scripts that source the password from a secure secret store at invocation time.
+A password passed with `--password` ends up in the shell history (`~/.bash_history`), in `/proc/<pid>/cmdline`, and in the output of process-listing tools. The interactive prompt is the safer route. The flag exists for provisioning scripts that read the value from a secret store at invocation time.
 
-The same flag set is also available on `bssh edit`, plus `--name`, `--host`, `--port`, and `--username` for in-place field updates. By default, flags you pass are applied and everything else still goes through the interactive prompts, so mixing is fine:
+`bssh edit` takes the same flag set, plus `--name`, `--host`, `--port` and `--username` for in-place updates. By default the flags you pass are applied and the rest of the fields is reviewed interactively.
 
 ```bash
 # Apply the listed fields, interactively review the rest
@@ -288,7 +234,7 @@ bssh edit prod --keep-alive 60 --notes "updated" -t prod -t eu
 bssh edit prod --host 10.0.0.9
 ```
 
-Pair any flag with `-s` / `--skip` to **bypass the interactive review entirely** — only the flags you pass are applied, everything else is preserved verbatim:
+With `-s` and `--skip`, the interactive review is skipped entirely: only the flags you pass are applied, and everything else is preserved verbatim.
 
 ```bash
 # Clear just the pre-connect hook, no prompts
@@ -298,34 +244,46 @@ bssh edit prod --no-pre -s
 bssh edit prod --host 10.0.0.9 -s
 ```
 
-Empty-string clearing works here too: `--jump ""` drops the ProxyJump, `--notes ""` wipes the note, etc. The dedicated `--no-pre` / `--no-post` / `--no-env` / `--no-forwards` flags do the same thing without having to quote an empty string (useful on PowerShell, where `--pre ""` gets eaten before reaching the CLI).
+Empty-string clearing works as well: `--jump ""` drops the ProxyJump, `--notes ""` wipes the note. The dedicated `--no-pre`, `--no-post`, `--no-env` and `--no-forwards` flags do the same thing without quoting an empty string, which matters on PowerShell, where `--pre ""` is eaten before it reaches the CLI.
 
 Boolean toggles use Typer's `--x11/--no-x11` syntax on `bssh edit`: pass `--x11` to enable, `--no-x11` to disable, or omit both to keep the current value.
 
-### Server Notes, Tags, and Keep-Alive
+`bssh rm` asks for confirmation, and `--yes` and `-y` skip it.
 
-Four optional per-server fields surface as columns in the `ls` / `recent` tables when at least one server has them set:
+### Jump hosts
 
-- **Notes** — free-form text attached to a server (`Notes` column, truncated at 40 chars). Edit with `bssh edit` or set at creation time with `--notes`.
-- **Tags** — small labels (e.g. `prod`, `db`, `eu-west`) used to organize and filter the list (`Tags` column). Tags are comma-separated in the interactive prompt or passed repeatedly as `-t prod -t db`. `bssh ls <query>` matches on tags, so `bssh ls prod` pulls every server labeled that way.
-- **Keep-Alive** — a `ServerAliveInterval` value in seconds. When set, `bssh connect` passes `-o ServerAliveInterval=<N> -o ServerAliveCountMax=3` to OpenSSH, preventing NAT/idle disconnects (`Alive` column, e.g. `60s`). Enter `0` at the prompt (or `--keep-alive 0`) to leave it disabled.
-- **Last used** — a relative timestamp (`5m ago`, `2h ago`, `3d ago`, or an ISO date for older) automatically recorded on every successful `bssh connect`. Surfaces in both `ls` and `recent` so you can see freshness at a glance.
+A jump host is another saved server, referenced by name. `bssh` resolves the chain and passes it to OpenSSH as `ProxyJump` (`-J`).
 
-All four columns are auto-hidden when no server has a value set.
+```bash
+bssh add --name prod --host prod.example --username deploy --jump bastion
+bssh add --name prod --host prod.example --username deploy -J bastion
+```
 
-### Port Forwarding
+The reference is matched case-insensitively, and the canonical spelling of the saved server is what gets stored. In the interactive picker, each candidate shows how many other servers already use it as a jump host.
 
-`bssh` stores per-server port-forward presets and passes them to OpenSSH automatically on every `bssh connect`. Three forwarding types are supported, matching OpenSSH flags:
+- `bssh edit` always asks "Change jump host?" when one is set, with a `(none, direct connection)` choice first in the list.
+- Renaming a server that others use as a jump host updates every referencing server in the same save.
+- `bssh rm` warns when the target is used as a jump host and then asks whether to clear `jump_host` on the servers that depend on it. The default is yes, and declining aborts the removal.
+- A cycle (`A` to `B` to `A`) and an unknown reference are refused at save time.
+- `bssh isc` reads the `ProxyJump` directive and sets `jump_host` when the referenced target matches another imported alias, case-insensitively.
+
+Three limits are worth knowing before a chain fails on a remote host:
+
+- The credentials of a bastion are not forwarded into `ssh -J`. Only `user@host:port` is passed for each hop, and OpenSSH resolves the bastion credentials through its own mechanisms (`~/.ssh/config`, `ssh-agent`, default keys). A `key_path` or a `password` stored on the bastion entry in `bssh` is not used during a jump connection. Declare it with `IdentityFile` in `~/.ssh/config` or add it to `ssh-agent`.
+- The password clipboard covers only the target. The bastion asks for its password separately.
+- Multi-hop `ProxyJump h1,h2` specs and inline `user@host:port` specs in `~/.ssh/config` are skipped during the import. Only single-hop alias references to other imported hosts are kept. A longer chain is built by adding each bastion as its own server and chaining `jump_host` references.
+
+### Port forwarding
+
+Port-forward presets are stored per server and passed to OpenSSH on every connect.
 
 | Type | Flag | Example | Meaning |
 | --- | --- | --- | --- |
-| Local | `-L` | `-L 5432:localhost:5432` | Forward local port 5432 to `localhost:5432` on the remote side (typical: tunnel a remote DB to your laptop). |
-| Remote | `-R` | `-R 9000:internal:9000` | Forward remote port 9000 back to `internal:9000` on your network (typical: expose a local service to the remote host). |
+| Local | `-L` | `-L 5432:localhost:5432` | Forward local port 5432 to `localhost:5432` on the remote side, the usual way to tunnel a remote database to a laptop. |
+| Remote | `-R` | `-R 9000:internal:9000` | Forward remote port 9000 back to `internal:9000` on the local network, the usual way to expose a local service to the remote host. |
 | Dynamic | `-D` | `-D 1080` | Open a SOCKS proxy on local port 1080 that routes through the server. |
 
-All three accept an optional bind address (e.g. `127.0.0.1:5432:localhost:5432`).
-
-Non-interactive provisioning:
+All three accept an optional bind address, for example `127.0.0.1:5432:localhost:5432`.
 
 ```bash
 bssh add --name prod-db --host 10.0.0.5 --username deploy \
@@ -334,74 +292,58 @@ bssh add --name prod-db --host 10.0.0.5 --username deploy \
   -D 1080
 ```
 
-Interactive flow: `bssh add` and `bssh edit` ask "Configure port forwards?" — picking yes opens a small loop where you choose local/remote/dynamic and enter a spec, repeating until you pick `(done)`.
+Interactively, `bssh add` and `bssh edit` ask "Configure port forwards?". Answering yes opens a small loop where the type is chosen and a spec is entered, repeated until `(done)` is picked.
 
-Editing an existing server's forwards:
+When editing an existing server:
 
-- Passing any `-L`/`-R`/`-D` flag to `bssh edit` **replaces** the entire forwards list (consistent with `--tag`).
-- `bssh edit <name> --no-forwards` clears all forwards.
-- Passing no forward-related flags keeps the existing list and opens the interactive prompt when no other flags trigger non-interactive mode.
+- Passing any `-L`, `-R` or `-D` flag to `bssh edit` replaces the whole list, the same way `--tag` replaces the tags.
+- `bssh edit <name> --no-forwards` clears all of them.
+- Passing no forward-related flag keeps the existing list, and opens the interactive prompt when no other flag has put the command into non-interactive mode.
 
-`bssh ls` shows a `Fwd` column with the count (hidden when nobody has any). `bssh view <name>` lists each forward on its own line.
+`bssh ls` shows a `Fwd` column with the count, hidden when nobody has any. `bssh view <name>` lists each forward on its own line.
 
-### File Transfer (put / get)
+### Environment variables
 
-`bssh put` uploads and `bssh get` downloads, using `scp` under the hood and composing with the server's saved profile (port, key, certificate, jump host, keep-alive).
-
-```bash
-# Upload
-bssh put prod-db ./backup.sql /var/backups/backup.sql
-bssh put prod-db ./releases -r -C              # directory with compression
-bssh put prod-db ./archive.tar.gz /var/backups/ -p   # keep mtime/atime/mode
-
-# Download
-bssh get prod-db /var/log/app.log ./app.log
-bssh get prod-db /etc/nginx -r ./nginx-snapshot
-bssh get prod-db /var/snapshots/data.bin ./data.bin -p   # preserve timestamps
-```
-
-Flag reference:
-
-| Flag | Short | Purpose |
-| --- | --- | --- |
-| `--recursive` | `-r` | Recurse into directories (scp `-r`) |
-| `--compress` | `-C` | Enable scp compression |
-| `--preserve` | `-p` | Preserve modification times, access times, and modes (scp `-p`) |
-
-Notes:
-
-- Port forwards (`-L`/`-R`/`-D`) and X11 on the server profile are **not** applied to transfers — they're connection-only settings.
-- Password authentication prompts come from OpenSSH itself; `bssh`'s clipboard copy is only wired into `bssh connect` and `bssh sftp`, not `put`/`get`.
-- ProxyJump uses the server's stored `jump_host` chain, same as `connect`.
-- Requires `scp` on PATH (shipped with OpenSSH client tools). Missing binary -> exit code 127.
-
-### Interactive SFTP Session
-
-`bssh put` / `bssh get` work great when you already know the remote path. When you don't — you want to browse, list, grab a few files — drop into a full SFTP session via `bssh sftp`:
+Per-server environment variables are pushed to every `bssh connect` with OpenSSH's `SetEnv`.
 
 ```bash
-bssh sftp                  # pick from the interactive menu
-bssh sftp prod-db          # go straight to this server
-bssh sftp prod-db --no-copy  # skip the password-to-clipboard copy
+bssh add --name prod --host h --username u \
+  -e LANG=en_US.UTF-8 \
+  -e DEPLOY_ENV=prod \
+  -s
+
+bssh edit prod --env LANG=en_US.UTF-8  # replaces the whole env dict
+bssh edit prod --no-env                # clears all env vars
+bssh view prod                         # shows "Environment: LANG=..., DEPLOY_ENV=..."
 ```
 
-Then you're at the `sftp>` prompt:
+- Each pair becomes a separate `-o SetEnv=KEY=VALUE` on the SSH command line.
+- `SetEnv` (OpenSSH 7.8 and newer) pushes a literal value and does not need `AcceptEnv` on the remote `sshd`. Older servers drop unknown environment variables without a word.
+- Passing any `--env` to `bssh edit` replaces the stored dictionary, the same way `--tag` replaces the tags. `--no-env` clears it.
+- An empty value is allowed (`--env FOO=`), which is useful for unsetting an inherited pattern. A value may contain `=`, because the pair is split on the first one only.
 
-```text
-sftp> cd /var/log
-sftp> ls -la
-sftp> get app.log
-sftp> put ./local-patch.sh /tmp/
-sftp> bye
+### X11 forwarding
+
+Set X11 forwarding on a server and `bssh connect` passes `-X` to OpenSSH. GUI applications started on the remote side try to render through the local display.
+
+```bash
+bssh add --name workstation --host ws.example --username dev --x11
+bssh edit workstation --x11       # turn on
+bssh edit workstation --no-x11    # turn off
+bssh view workstation             # shows "X11: enabled (ssh -X)" row when on
 ```
 
-The session reuses the server's full profile — port, key, certificate, jump-host chain, keep-alive — and honors the same **pre / post-connect hooks** `bssh connect` does. So a VPN-up hook, an `aws sso login` refresh, or an sshfs mount that you configured for a server runs here too. Forwards / X11 / SetEnv are connection-oriented features and don't apply to sftp.
+On the client side:
 
-Requires the `sftp` binary on PATH (shipped with the OpenSSH client package). Missing binary exits with rc=127.
+- **Linux** usually has an X11 display already running, and nothing extra to install.
+- **macOS** needs [XQuartz](https://www.xquartz.org/). Install it and log out and in once, so that `$DISPLAY` is set.
+- **Windows** needs an X server: VcXsrv, Xming, or WSLg on Windows 11. Without one, OpenSSH logs `X11 forwarding request failed` and the GUI applications fail with `Can't open display`.
 
-### Pre- and Post-Connect Hooks
+`bssh` emits `-X`, the untrusted mode, which is the safer default. Some X11 applications, an older `xterm` or certain Matplotlib backends, fail under the X11 SECURITY extension and need the trusted mode `-Y`. When `BadAccess` or `SECURITY` errors show up, enable `ForwardX11Trusted yes` for that host in `~/.ssh/config`; the `-X` that `bssh` emits composes with the SSH config, so the directive takes effect.
 
-Two optional per-server shell commands that run locally around every `bssh connect`. Typical use cases: bringing up a corporate VPN, refreshing an AWS SSO token, mounting `sshfs`, posting to Slack, or running audit logging.
+### Pre- and post-connect hooks
+
+Two optional per-server shell commands run locally around every `bssh connect`. The usual reasons are bringing up a corporate VPN, refreshing an AWS SSO token, mounting `sshfs`, posting to Slack, or writing an audit log.
 
 ```bash
 # Bring a VPN up before each connect, tear it down after:
@@ -418,86 +360,108 @@ bssh edit prod --no-pre --no-post          # explicit clear
 bssh edit prod --pre "" --post ""          # empty-string form works too
 ```
 
-Semantics:
+- The pre hook runs before SSH and is a prerequisite. A non-zero exit aborts the connect with the hook's exit code, and the SSH client is never started. The post hook does not run in that case.
+- The post hook always runs once the pre hook has succeeded, or when there was no pre hook: after a successful session, after Ctrl+C (exit code 130), after an authentication failure, and after a configuration error such as a broken jump-host reference where SSH was never launched. That is where cleanup belongs, and the setup-then-teardown contract holds even when SSH itself never starts. A non-zero post exit is reported as a yellow warning and does not override the final exit code.
+- The commands run through the platform shell, `sh -c` on POSIX and `cmd.exe /c` on Windows, so pipes, redirects and environment variable expansion all work.
+- The hooks apply to `bssh connect` and to the interactive `bssh <query>` shortcut. `bssh exec`, `bssh put` and `bssh get` deliberately do not run them, because running a hook per host in a non-interactive flow would surprise.
 
-- **Pre runs before ssh.** It is a prerequisite: if the hook exits non-zero, `bssh connect` aborts with the hook's exit code and does not attempt ssh. The post hook is not run in this case.
-- **Post always runs once pre has succeeded** (or no pre was set) — after a successful ssh session, after Ctrl+C (rc 130), after an auth failure, and after an upfront config error like a broken jump-host reference where ssh was never launched. This is the place for cleanup and the "setup ran ⇒ teardown runs" contract holds even when ssh itself never starts. A non-zero post exit is reported as a yellow warning but does not override the final exit code.
-- Commands execute through the platform shell (`sh -c` on POSIX, `cmd.exe /c` on Windows). Pipes, redirects, and environment-variable expansion all work.
-- Hooks only apply to `bssh connect` (and the interactive `bssh <query>` shortcut). `bssh exec`, `bssh put`, `bssh get` intentionally do **not** run hooks — they're non-interactive flows where running hooks per-host would be surprising.
+The commands run on the local machine, with the local shell and the local privileges. A `servers.json` from an untrusted source can carry a hostile pre or post hook, so an imported configuration is worth reading before it is allowed to run.
 
-**Security note:** the commands run on your local machine with your shell and your privileges. A `servers.json` imported from an untrusted source could ship a malicious pre/post hook; audit any imported config before letting it touch your machine.
+### File transfer
 
-### Environment Variables
-
-Per-server environment variables pushed to every `bssh connect` via OpenSSH's `SetEnv` directive. Useful for fixing `LANG` / `LC_ALL` mismatches, flagging debug mode (`DEBUG=1`), injecting project / cluster context (`DEPLOY_ENV=prod`), etc.
+`bssh put` uploads and `bssh get` downloads. Both use `scp` and compose with the server's stored profile: port, key, certificate, jump host and keep-alive.
 
 ```bash
-bssh add --name prod --host h --username u \
-  -e LANG=en_US.UTF-8 \
-  -e DEPLOY_ENV=prod \
-  -s
+# Upload
+bssh put prod-db ./backup.sql /var/backups/backup.sql
+bssh put prod-db ./releases -r -C              # directory with compression
+bssh put prod-db ./archive.tar.gz /var/backups/ -p   # keep mtime/atime/mode
 
-bssh edit prod --env LANG=en_US.UTF-8  # replaces the whole env dict
-bssh edit prod --no-env                # clears all env vars
-bssh view prod                         # shows "Environment: LANG=..., DEPLOY_ENV=..."
+# Download
+bssh get prod-db /var/log/app.log ./app.log
+bssh get prod-db /etc/nginx -r ./nginx-snapshot
+bssh get prod-db /var/snapshots/data.bin ./data.bin -p   # preserve timestamps
 ```
 
-Notes:
+| Flag | Short | Purpose |
+| --- | --- | --- |
+| `--recursive` | `-r` | Recurse into directories (scp `-r`) |
+| `--compress` | `-C` | Enable scp compression |
+| `--preserve` | `-p` | Preserve modification times, access times, and modes (scp `-p`) |
 
-- Each pair becomes a separate `-o SetEnv=KEY=VALUE` on the ssh command line.
-- `SetEnv` (OpenSSH 7.8+) pushes a literal value and does **not** require `AcceptEnv` on the remote sshd. Older servers silently drop unknown env vars.
-- Passing any `--env` to `bssh edit` **replaces** the stored dict (symmetric with `--tag`). Use `--no-env` to clear.
-- Empty values are allowed (`--env FOO=`), useful for unsetting an inherited variable pattern. Values may contain `=` (partitioned on the first `=` only).
+- Port forwards and X11 on the server profile are not applied to a transfer. They are connection-only settings.
+- The password prompt comes from OpenSSH itself. The clipboard copy is wired into `bssh connect` and `bssh sftp` only, not into `put` and `get`.
+- The ProxyJump chain is the server's stored `jump_host` chain, the same one `connect` uses.
+- `scp` has to be on PATH. It ships with the OpenSSH client tools, and a missing binary exits with code 127.
 
-### X11 Forwarding
+### Interactive SFTP session
 
-Set `x11_forwarding` on a server to have `bssh connect` pass `-X` to OpenSSH. GUI apps launched on the remote side will try to render through a local X11 display.
+`bssh put` and `bssh get` work when the remote path is known. When it is not, `bssh sftp` opens a full SFTP session.
 
 ```bash
-bssh add --name workstation --host ws.example --username dev --x11
-bssh edit workstation --x11       # turn on
-bssh edit workstation --no-x11    # turn off
-bssh view workstation             # shows "X11: enabled (ssh -X)" row when on
+bssh sftp                    # pick from the interactive menu
+bssh sftp prod-db            # go straight to this server
+bssh sftp prod-db --no-copy  # skip the password-to-clipboard copy
 ```
 
-**Prerequisites on the client side:**
+Then the SFTP prompt is yours:
 
-- **Linux** — an X11 display is usually already running; nothing extra to install.
-- **macOS** — install [XQuartz](https://www.xquartz.org/) and log out/in once so `$DISPLAY` is set.
-- **Windows** — install an X server: VcXsrv, Xming, or use WSLg (Windows 11). Without one, OpenSSH will log `X11 forwarding request failed` and GUI apps will fail with `Can't open display`.
+```text
+sftp> cd /var/log
+sftp> ls -la
+sftp> get app.log
+sftp> put ./local-patch.sh /tmp/
+sftp> bye
+```
 
-**`-X` vs `-Y`:** `bssh` emits `-X` (untrusted mode) which is the safer default. Some X11 apps — older `xterm`, certain Matplotlib backends — fail under the X11 SECURITY extension and need trusted mode (`-Y`). If you hit `BadAccess` / `SECURITY` errors, enable `ForwardX11Trusted yes` for that host in `~/.ssh/config` — `bssh`'s `-X` composes with your SSH config, so the directive takes effect.
+The session reuses the full profile, port, key, certificate, jump-host chain and keep-alive, and it honors the same pre and post hooks that `bssh connect` honors. A VPN-up hook, an `aws sso login` refresh, or an `sshfs` mount configured for a server runs here too. Forwards, X11 and `SetEnv` are connection-oriented and do not apply to a file-transfer session.
 
-### Viewing a Single Server
+`sftp` has to be on PATH. It ships with the OpenSSH client package, and a missing binary exits with code 127.
 
-`bssh view <name>` (alias `v`) renders a full-fidelity card for one server in a Rich panel. Unlike `ls`, nothing gets truncated — useful when you want to see the complete notes, the resolved jump chain (`user@bastion:port → target-name`), and the list of other servers that reference this one as a jump host.
+### Parallel command broadcast
+
+`bssh exec` runs one shell command on every server a query matches, in parallel, with a per-host colored prefix on each output line and an aggregated summary at the end.
 
 ```bash
-bssh view prod
-bssh v prod-db
+bssh exec "uptime" prod           # every server matched by the 'prod' query
+bssh exec "df -h /" --all         # every saved server
+bssh exec "systemctl is-active nginx" web --timeout 15
 ```
 
-The view also flags a broken jump-host reference in red instead of failing silently, so you can spot stale ProxyJump targets before a connection attempt.
+The query matches the same fields as `bssh ls`: name, host, username, tag, id prefix or jump host. `--all` skips the filter.
 
-### Importing From SSH Config
+| Flag | Purpose | Default |
+| --- | --- | --- |
+| `--all` | Run on every saved server instead of filtering | off |
+| `--timeout <seconds>` | Per-host overall timeout (the remote command is killed after it) | 30 |
+| `--connect-timeout <seconds>` | TCP connect timeout (`ssh -o ConnectTimeout`) | 10 |
 
-Import hosts from your OpenSSH config:
+Each host's standard output lines are tagged with `[<name>]` in its own color, the error lines are red, and a `(<duration>, ok)` or `(<duration>, exit N)` status line closes the output of each host. The summary reports how many hosts succeeded, for example `Summary: 8/10 ok in 2.3s`. The exit code is 0 only when every host returned 0 without a connection-level error.
+
+Three caveats:
+
+- The runs use `ssh -o BatchMode=yes`, so a password prompt never interleaves with a parallel sweep. A password-only server fails fast with a clear authentication error. Use key or certificate authentication, or `ssh-agent`, for `exec`.
+- Port forwards and X11 on the server profile are ignored, since they belong to an interactive connection.
+- There is no concurrency cap in this version. Every matched server gets its own `ssh` process, which is fine up to the low hundreds of hosts.
+
+### Availability checks
+
+`bssh ping <query>` opens a TCP connection to the SSH port of one server and reports the result with the round-trip time in milliseconds. The probe times out after 3 seconds.
+
+`bssh health` probes every saved server at the same time, with a per-server probe timeout of 5 seconds by default and `--timeout` to change it. The whole scan takes about the timeout rather than the timeout times the number of servers. The table is sorted by name, and the command exits with 1 when at least one server is unreachable.
+
+### Import and export
+
+`bssh import-ssh-config` reads the hosts from an OpenSSH config file, and `~/.ssh/config` by default.
 
 ```bash
 bssh isc
-```
-
-Or import from a custom path:
-
-```bash
 bssh isc ~/.ssh/work-config
 ```
 
-The importer resolves each host through `ssh -G`, so `Host *`, `Include`, explicit `IdentityFile`, and explicit `CertificateFile` are reflected in imported entries.
+The importer resolves each host through `ssh -G`, so `Host *`, `Include`, an explicit `IdentityFile` and an explicit `CertificateFile` are all reflected in the imported entries. The default OpenSSH keys stay implicit: a host that works with a plain `ssh host` because of the default keys or `ssh-agent` keeps working that way, and no key path is pinned unless the SSH config says so explicitly.
 
-Default OpenSSH keys remain implicit. If a host works with plain `ssh host` because of default keys or `ssh-agent`, `bssh` will keep using that behavior without pinning a key path unless your SSH config explicitly does so.
-
-When servers already exist locally, both `bssh import` (JSON) and `bssh isc` (SSH config) ask how to reconcile — keep existing + add new (**merge**) or wipe and replace (**replace**). Flags let you pick in scripts:
+`bssh import` and `bssh isc` both ask how to reconcile when servers already exist locally: keep what is there and add the new ones (merge), or wipe everything and replace it. Flags pick the mode in a script.
 
 ```bash
 # Interactive: mode picker + explicit safety confirm naming the counts
@@ -513,260 +477,161 @@ bssh import backup.json --replace --yes    # WIPES everything and imports
 bssh isc --merge -y
 ```
 
-The safety confirmation spells out the destructive action with counts: `DELETE all 12 existing server(s) and import 3 from 'backup.json'?` — so a reflex `y` doesn't silently wipe the store. Passing `--merge` and `--replace` together is rejected (rc=2).
+The safety confirmation spells the destructive action out with counts: `DELETE all 12 existing server(s) and import 3 from 'backup.json'?`, so a reflex `y` cannot wipe the store. Passing `--merge` and `--replace` together is rejected with exit code 2.
 
-### Parallel Command Broadcast
+`bssh export <file>` writes the servers to a JSON file. When encryption is on and some servers have passwords, the export asks whether the passwords go out in plaintext or stay encrypted. The plaintext form is for a move to another machine, the encrypted form only works on the machine that has the key and the salt.
 
-`bssh exec` runs a single shell command on every server matched by a query, in parallel, with a per-host colored prefix on each output line and an aggregated summary at the end.
-
-```bash
-bssh exec "uptime" prod           # every server matched by the 'prod' query
-bssh exec "df -h /" --all         # every saved server
-bssh exec "systemctl is-active nginx" web --timeout 15
-```
-
-The query matches the same fields as `bssh ls` / shorthand connect: name, host, username, tag, id prefix, or jump host. Use `--all` to skip the filter.
-
-Flag reference:
-
-| Flag | Purpose | Default |
-| --- | --- | --- |
-| `--all` | Run on every saved server instead of filtering | off |
-| `--timeout <seconds>` | Per-host overall timeout (remote command is killed after) | 30 |
-| `--connect-timeout <seconds>` | TCP connect timeout (`ssh -o ConnectTimeout`) | 10 |
-
-Each host's stdout lines are tagged with `[<name>]` in its own color, stderr lines are red, and a `(<duration>, ok)` or `(<duration>, exit N)` status line closes each host's output. The summary reports how many hosts succeeded, e.g. `Summary: 8/10 ok in 2.3s`. Exit code is 0 only when every host returned 0 without a connection-level error.
-
-**Known caveats:**
-
-- Runs use `ssh -o BatchMode=yes` to avoid interleaved password prompts from parallel runs. Password-only servers will fail fast with a clear auth error — use key or certificate auth (or ssh-agent) for `exec`.
-- Port forwards and X11 forwarding on the server profile are ignored here (they're interactive-connection features).
-- No concurrency cap in v1; every matched server gets its own `ssh` process. Fine up to low hundreds of hosts.
-
-### Exporting Back to SSH Config
-
-The reverse operation — turn every saved server into `Host` blocks that native OpenSSH tooling (`ssh`/`scp`/`rsync`/`git`/IDEs) can read directly:
+`bssh export-ssh-config` (alias `esc`) does the opposite of the import. It turns every saved server into `Host` blocks:
 
 ```bash
 bssh export-ssh-config ~/.ssh/config.bssh
-# or the short alias:
 bssh esc ~/.ssh/config.d/bssh.conf
 ```
 
-Each server becomes a `Host <name>` block with every field that has an ssh_config equivalent:
+Each block carries the fields that have an `ssh_config` equivalent:
 
-- `HostName`, `User`, non-default `Port`
+- `HostName`, `User`, and `Port` when it is not 22
 - `IdentityFile`, `CertificateFile`
 - `ProxyJump`
-- `ServerAliveInterval` + `ServerAliveCountMax 3` (when keep-alive is set)
-- `ForwardX11 yes` (when X11 is enabled)
-- `LocalForward` / `RemoteForward` / `DynamicForward` (one line per port forward, bind host preserved)
+- `ServerAliveInterval` and `ServerAliveCountMax 3` when the keep-alive is set
+- `ForwardX11 yes` when X11 is enabled
+- `LocalForward`, `RemoteForward` and `DynamicForward`, one line per forward, with the bind host preserved
 
-Fields that have no native ssh_config syntax (`password`, `tags`, `notes`) are written as leading comments so the context survives for a human reader.
+The fields that have no `ssh_config` syntax, the password, the tags and the notes, are written as leading comments, so the context survives for whoever opens the file later.
 
-After exporting, activate the file by adding
+Activate the exported file by adding
 
 ```text
 Include ~/.ssh/config.bssh
 ```
 
-to your `~/.ssh/config`, or pass `-F ~/.ssh/config.bssh` directly to `ssh`. Overwriting an existing file prompts for confirmation — pass `-f` / `--force` (or use `bssh export -f` for the JSON variant) to skip the prompt for scripts/CI. Exit code is `0` on success, `1` when the user declines the overwrite prompt, so pipelines can tell whether the file was actually written.
+to `~/.ssh/config`, or by passing `-F ~/.ssh/config.bssh` to `ssh` directly. Overwriting an existing file asks for confirmation, and `-f` and `--force` skip the prompt for scripts and CI. The exit code is 0 when the file was written and 1 when the overwrite was declined, so a pipeline can tell the two apart.
 
-### Server Identification
+## How it works
 
-Every command that takes a `<query>` argument (`connect`, `edit`, `view`, `remove`, `pin`, `unpin`, `ping`, `put`, `get`, `copy-pass`, `show-pass`, `ls`, `exec`, `health`) resolves it the same way. Match order for a single-target command:
-
-1. Exact server ID
-2. Unique server-ID prefix
-3. Exact name (case-insensitive)
-4. **Unique broad match** — case-insensitive substring in name, host, username, any tag, or jump host
-
-If step 4 finds more than one server, the command drops into an interactive picker over the matching candidates (same set `bssh ls <query>` would print). If nothing matches at all, the command prints a "not found" error.
-
-`bssh ls <query>` and `bssh exec <query>` print / act on every matching server directly, so they skip the picker step; the match fields are the same.
-
-Names are unique (case-insensitive): adding or renaming to a name already in use is rejected with an error pointing at the existing entry.
-
-## Jump Hosts (ProxyJump)
-
-`bssh` supports connecting through one or more bastion hosts using OpenSSH's `ProxyJump` (`-J`). A jump host is just another saved server referenced by name.
-
-### Setting a jump host
-
-During `bssh add`, after the basic fields, the tool asks:
-
-```text
-Use a jump host (ProxyJump)? [y/N]
+```
+CLI command
+  -> storage.load_servers()      read servers.json, decrypt the passwords
+  -> domain / storage.find_server()  resolve the query to one server
+  -> ssh.connect()               build the ssh argv, run it
+  -> storage.record_server_use() count the use, stamp the time, save
 ```
 
-Confirming opens a picker over your other saved servers. The picker marks the current selection and shows how many other servers already use each candidate as a jump host.
+The package is `app/`, and the command layer is split by subject.
 
-For non-interactive use (scripts, automation), pass the name directly:
+| Path | What it holds |
+| --- | --- |
+| `app/models.py` | The Pydantic `Server` model and the `Forward` model, with the rendering of a forward as an OpenSSH spec. |
+| `app/domain.py` | Pure logic: sorting, the query matcher, tag and env parsing, name uniqueness, the jump-chain walk. No I/O, no Typer, no Rich. |
+| `app/storage.py` | The JSON store, and the transparent encrypt-on-save and decrypt-on-load layer over it. |
+| `app/encryption.py` | Fernet and the PBKDF2 key derivation from an SSH key. |
+| `app/ssh.py` | The OpenSSH command construction, the jump resolution, the pre and post hooks, and the availability probe. |
+| `app/ssh_config.py` | The `~/.ssh/config` importer, through `ssh -G`, and the renderer that writes `Host` blocks back out. |
+| `app/cli/` | The Typer application, split into one module per subject. |
 
-```bash
-bssh add --name prod --host prod.example --username deploy --jump bastion
-# short form
-bssh add --name prod --host prod.example --username deploy -J bastion
-```
+A few decisions are visible in the code and worth knowing before changing it.
 
-Reference matching is case-insensitive; the canonical casing from the saved server is stored.
+**The tool never speaks the SSH protocol.** It builds an argument list and runs `ssh`, `sftp` or `scp`. The command it is about to run is printed first, so the user can see it. Whatever `~/.ssh/config` says still applies, because the tool adds options rather than replacing them.
 
-### Editing and removal
+**The option order is fixed.** The `ssh` command line is built as port, keep-alive, forwards, environment, X11, jump host, key, certificate, and finally the target. The environment variables keep their insertion order, so the same server always produces the same command line.
 
-- `bssh edit` always shows "Change jump host?" when one is set, opening the picker with a `(none — direct connection)` option first.
-- Renaming a server used as a jump host by others **automatically updates** all referencing servers in one save.
-- `bssh rm` warns when the target is used as a jump host by others and offers to clear `jump_host` on those dependents (default yes). Declining aborts the removal entirely.
-- Cycles (`A → B → A`) and unknown references are rejected at save time, not silently accepted.
+**The jump chain excludes the target.** `resolve_jump_chain` walks `jump_host` references and returns the hops in the order OpenSSH expects for `-J`, and raises on a cycle or an unknown reference.
 
-### Importing from `~/.ssh/config`
+**The pre and post hooks are committed to each other.** Once the pre hook has succeeded, the post hook runs on every exit path, including a configuration error and a Ctrl+C. The code says so in a comment above the `try` block, and the contract is that setup implies teardown.
 
-`bssh isc` reads the `ProxyJump` directive and sets `jump_host` when the referenced target matches another imported alias (case-insensitive).
+**The query grammar is one grammar.** `storage.find_server` and `domain.servers_matching_query` are aligned on purpose, so that `bssh connect prod` and `bssh ls prod` agree about what "prod" means.
 
-### Known limitations
+**The store is plain JSON.** `servers.json` holds the servers and the encrypted passwords, `settings.json` holds the encryption flag, the key source and the salt. The file is written with the servers in the order they are saved, and the tables are sorted at display time.
 
-- **Bastion auth is not forwarded into `ssh -J`.** We pass only `user@host:port` for each hop; OpenSSH resolves credentials for the bastion through its own mechanisms (`~/.ssh/config`, `ssh-agent`, default keys). A `key_path` or `password` saved on the bastion entry in `bssh` is **not** used during a jump connection — if the bastion needs a specific key, declare it via `IdentityFile` in `~/.ssh/config` or add it to `ssh-agent`. This is a limitation of `ssh -J` itself, not `bssh`.
-- **Password clipboard covers only the target**, not the bastion. You'll be prompted for the bastion's password separately during connection.
-- **Multi-hop `ProxyJump h1,h2` and inline `user@host:port`** specs in `~/.ssh/config` are **skipped** during import. Only single-hop alias references to other imported hosts are preserved. Set multi-hop chains manually by adding each bastion as its own server and chaining `jump_host` references.
+**The tables hide what is empty.** A column appears only when at least one server has a value for it, so a small store prints a small table.
 
 ## Configuration
 
-Configuration files are stored in platform-specific directories:
+The configuration lives in a platform-specific directory.
 
-- **Windows:** `%LOCALAPPDATA%\better-ssh\`
-- **macOS:** `~/Library/Application Support/better-ssh/`
-- **Linux:** `~/.config/better-ssh/`
+| Platform | Path |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\better-ssh\` |
+| macOS | `~/Library/Application Support/better-ssh/` |
+| Linux | `~/.config/better-ssh/` |
 
-### Configuration Files
+Two files are there:
 
-- `servers.json` — server configurations and encrypted passwords
-- `settings.json` — application settings (encryption status, key source, salt)
+- `servers.json` holds the server configurations and the encrypted passwords.
+- `settings.json` holds the application settings: the encryption status, the key source and the salt.
 
-## Password Encryption
+### Password encryption
 
-By default, passwords are stored in plaintext. The application offers optional encryption using your SSH private key as the encryption key source.
-
-### Managing Encryption
+By default, passwords are stored in plaintext. The application can encrypt them, using the SSH private key as the source of the key material.
 
 ```bash
 bssh es            # check encryption status
 bssh enc           # enable encryption (interactive)
 bssh dec           # disable encryption (interactive)
 
-# For scripts / CI — skip the "are you sure?" prompt:
+# For scripts / CI, skip the "are you sure?" prompt:
 bssh enc -y
 bssh dec -y
 ```
 
-When exporting servers, you can choose to export passwords in plaintext or encrypted format through an interactive prompt.
+The key derivation is PBKDF2-HMAC-SHA256 over the content of the SSH private key, with 100,000 iterations and a random 32-byte salt that is created once per installation and kept in `settings.json`. The passwords themselves are encrypted with Fernet and stored base64-encoded. The key is looked for as `~/.ssh/id_ed25519` or `~/.ssh/id_rsa`.
 
-### How It Works
+Passwords are encrypted on save and decrypted on load, so the rest of the application never sees a ciphertext. When the export runs, it asks whether the passwords go out in plaintext or stay encrypted.
 
-The encryption system uses your SSH private key (`~/.ssh/id_ed25519` or `id_rsa`) to derive an encryption key via PBKDF2-HMAC-SHA256 with 100,000 iterations and a random per-installation salt stored in `settings.json`. Passwords are encrypted using Fernet (symmetric encryption) and stored in base64 format.
+Four things to know before turning it on:
 
-### Important Considerations
+- **The key is the key.** Delete or change the SSH key and the encrypted passwords cannot be read any more.
+- **The machine is part of it.** Decryption needs the same SSH key and the same salt, on the same machine.
+- **Back up both.** The SSH key and `settings.json` are what make the store readable.
+- **It is automatic.** There is nothing to remember for daily use.
 
-- **Key Dependency:** If you delete or modify your SSH key, encrypted passwords become inaccessible
-- **Machine Specific:** Decryption requires the same SSH key and salt on the same machine
-- **Backup Recommended:** Back up your SSH key and `settings.json` before enabling encryption
-- **Automatic Operation:** Passwords are automatically encrypted on save and decrypted on load
+What this buys:
 
-### Security Properties
+- The passwords stay protected when `servers.json` is copied or leaked.
+- No master password is asked for on every run.
+- The SSH key is already protected by the file permissions of the operating system.
+- The random per-installation salt stops a precomputed attack against the key.
 
-- Passwords remain protected if the `servers.json` file is compromised
-- No master password required for daily use
-- SSH key protected by operating system file permissions
-- Random per-installation salt prevents precomputed key attacks
-
-## Platform Support
-
-- Windows 10/11
-- macOS 10.15+
-- Linux (any distribution with Python 3.12+)
-
-All Python dependencies are cross-platform. The only external requirement is a system SSH client, which is typically pre-installed on macOS and Linux.
-
-## Contributing
-
-Contributions are welcome. Please follow these guidelines:
-
-### Reporting Issues
-
-- Check existing issues before creating a new one
-- Include your operating system and Python version
-- Provide steps to reproduce the problem
-- Include relevant error messages or logs
-
-### Development Setup
-
-1. Fork the repository
-2. Clone your fork: `git clone https://github.com/aa-blinov/better-ssh.git`
-3. Create a virtual environment: `uv sync`
-4. Create a feature branch: `git checkout -b feature-name`
-5. Make your changes
-
-### Code Standards
-
-- Follow PEP 8 style guidelines
-- Use type hints for function signatures
-- Write docstrings for public functions and classes
-- Run linting: `uv run ruff check app tests`
-- Format code: `uv run ruff format app tests`
-- Ensure all checks pass before submitting
-
-### Testing
+## Development
 
 ```bash
-uv run pytest                                    # run all tests
-uv run pytest -v                                 # verbose output
-uv run pytest tests/test_models.py              # specific file
-uv run pytest --cov=app --cov-report=html       # with coverage report
+uv sync                 # install the dependencies, including the dev group
+uv run bssh --help      # run the tool from the checkout
+uv run pytest           # run the tests
+uv run ruff check app tests       # lint
+uv run ruff format app tests      # format
+uv run pre-commit install         # install the git hooks
 ```
 
-**Test Structure:**
+`uv run pytest` runs the nine test files under `tests/`, with branch coverage reported by default. The CI workflow runs the same commands on Ubuntu, Windows and macOS with Python 3.12, uploads the coverage to Codecov, and lints the Markdown files with markdownlint.
 
-- `tests/test_models.py` — Server model tests
-- `tests/test_domain.py` — Pure domain helpers (tag parsing, name uniqueness, jump-chain validation, sort/filter)
-- `tests/test_encryption.py` — Encryption/decryption tests
-- `tests/test_storage.py` — Configuration persistence tests
-- `tests/test_ssh.py` — SSH command and availability tests
-- `tests/test_ssh_config.py` — SSH config importer tests
-- `tests/test_transfer.py` — put / get scp wrapper tests
-- `tests/test_exec_cmd.py` — parallel broadcast command tests
-- `tests/test_cli.py` — CLI commands and interface tests
+The code follows PEP 8, with type hints on every signature, a docstring on every public function and class, and a 120-character line limit set in `.ruff.toml`.
 
-**Source Layout:**
+| Path | What it holds |
+| --- | --- |
+| `app/models.py` | The Pydantic `Server` model. |
+| `app/domain.py` | Pure logic: sorting, filtering, validation, tag parsing, jump-chain walking. |
+| `app/storage.py` | The JSON file I/O and the transparent encryption layering. |
+| `app/encryption.py` | Fernet and the PBKDF2 key derivation from an SSH key. |
+| `app/ssh.py` | The OpenSSH command construction, the jump resolution, the availability check. |
+| `app/ssh_config.py` | The `~/.ssh/config` importer, through `ssh -G`. |
+| `app/cli/__init__.py` | The package entry point. It builds the Typer app and re-exports the names the tests patch. |
+| `app/cli/_shared.py` | The Typer app instance, the console, the pickers and the common helpers. |
+| `app/cli/connection.py` | `connect`, `copy-pass`, `show-pass`, and the root callback. |
+| `app/cli/manage.py` | `add`, `edit`, `remove`, `view`. |
+| `app/cli/organize.py` | `list`, `pin`, `unpin`, `recent`. |
+| `app/cli/crypto.py` | `encrypt`, `decrypt`, `encryption-status`. |
+| `app/cli/backup.py` | `export`, `import`, `import-ssh-config`, `export-ssh-config`. |
+| `app/cli/health.py` | `ping`, `health`. |
+| `app/cli/transfer.py` | `put`, `get`, `sftp`, the `scp` wrappers. |
+| `app/cli/exec_cmd.py` | `exec`, the parallel broadcast. |
+| `tests/` | The test suite, one file per module. |
+| `docs/` | The landing page, a static HTML file with its stylesheet. |
 
-```text
-app/
-  models.py         Pydantic Server model
-  domain.py         Pure logic (sort/filter, validation, tag parsing, jump-chain walking)
-  storage.py        JSON file I/O with transparent encryption layering
-  encryption.py     Fernet + PBKDF2 key derivation from an SSH key
-  ssh.py            OpenSSH command construction, jump resolution, availability check
-  ssh_config.py     ~/.ssh/config importer via `ssh -G`
-  cli/
-    __init__.py     Package entry: builds the Typer app, re-exports for tests
-    _shared.py      Typer app instance, Console, pickers, common helpers
-    connection.py   connect, copy-pass, show-pass + root callback
-    manage.py       add, edit, remove, view
-    organize.py     list, pin, unpin
-    crypto.py       encrypt, decrypt, encryption-status
-    backup.py       export, import, import-ssh-config, export-ssh-config
-    health.py       ping, health
-    transfer.py     put, get (scp wrappers)
-    exec_cmd.py     exec (parallel broadcast)
-```
+`docs/` is published to GitHub Pages on every push that touches it, and the page lives at <https://aa-blinov.github.io/better-ssh/>.
 
-### Submitting Changes
-
-1. Ensure all tests pass: `uv run pytest`
-2. Run linting: `uv run ruff check app tests`
-3. Format code: `uv run ruff format app tests`
-4. Commit your changes with clear, descriptive messages
-5. Push to your fork
-6. Submit a pull request with a description of your changes
-7. Ensure all CI checks pass
+Contributions are welcome. The process, the code standards and the checklist for a pull request are in [CONTRIBUTING.md](CONTRIBUTING.md), and the history of the releases is in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT, © 2025 Alexander Blinov. See [LICENSE](LICENSE).
