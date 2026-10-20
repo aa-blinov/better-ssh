@@ -1,64 +1,60 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="better-ssh is a CLI that remembers your servers so you don't have to retype ssh -J bastion user@host -p 2222 -i ~/.ssh/custom_key for the hundredth time.">
-  <meta property="og:title" content="better-ssh — Remember your servers, not their arguments">
-  <meta property="og:description" content="A friendlier layer over OpenSSH: interactive picker, encrypted password clipboard, jump-host chains, parallel exec, and everything else you used to keep in a scratchpad.">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>better-ssh: a connection is one word instead of a long ssh line</title>
+  <meta name="description" content="better-ssh is a command-line tool for managing SSH connections with an interactive interface, password management and optional encryption. Every server keeps its jump chain, port forwards, environment variables and hooks.">
+  <meta name="color-scheme" content="dark light">
+  <meta property="og:title" content="better-ssh">
+  <meta property="og:description" content="A connection is one word instead of a long ssh line. better-ssh drives the OpenSSH client that is already on the machine.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://aa-blinov.github.io/better-ssh/">
-  <title>better-ssh — Remember your servers, not their arguments</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <nav class="topnav">
-    <a href="#" class="brand">better-ssh</a>
-    <div class="topnav-links">
-      <a href="https://github.com/aa-blinov/better-ssh">GitHub</a>
-      <a href="https://github.com/aa-blinov/better-ssh/releases/latest">Releases</a>
-      <a href="https://github.com/aa-blinov/better-ssh#readme">Docs</a>
-    </div>
-  </nav>
+  <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="hero">
-    <h1><span class="mono">better-ssh</span></h1>
-    <p class="tagline">Remember your servers, not their arguments.</p>
-    <p class="lede">
-      A thin layer over OpenSSH that stores everything you would otherwise keep
-      in a scratchpad — hosts, jump chains, port forwards, passwords, file
-      transfers, pre/post hooks — and gives you back <code>bssh</code>.
-    </p>
-    <div class="install-box" id="installBox">
-      <code id="installCmd">uv tool install git+https://github.com/aa-blinov/better-ssh.git@v0.3.0</code>
-      <button class="copy-btn" data-target="installCmd" aria-label="Copy install command">Copy</button>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="#top" aria-label="better-ssh, back to the top"><span>better-ssh</span></a>
+      <nav class="site-nav" aria-label="Sections">
+        <a href="#problem">The problem</a>
+        <a href="#before">Before and after</a>
+        <a href="#capabilities">What you get</a>
+        <a href="#install">Get started</a>
+      </nav>
+      <a class="header-github" href="https://github.com/aa-blinov/better-ssh">GitHub</a>
     </div>
-    <p class="prereq">Requires Python 3.12+ and an OpenSSH client.</p>
   </header>
 
-  <section class="problem">
-    <h2>The SSH config-file arms race</h2>
-    <p>
-      If you connect to more than a handful of servers, you've felt this. IPs live in a
-      Notion page. Passwords live in a password manager that you manually paste into the
-      terminal. Jump hosts get re-typed. Port forwards get forgotten between sessions.
-      Your shell history fills up with command fragments you stitched together last time.
-    </p>
-    <p>
-      <code>~/.ssh/config</code> helps — until you need more than what ssh_config can
-      express: a password that stays encrypted on disk, port forwards attached to the
-      server (not per invocation), or a local <code>aws sso login</code> that has to run
-      before every connect.
-    </p>
-  </section>
+  <main id="main">
 
-  <section class="shift">
-    <h2>Before / after</h2>
-    <div class="shift-grid">
-      <div class="shift-col">
-        <h3>Today</h3>
-<pre class="shell"><span class="prompt">$</span> <span class="cmt"># which server was that again?</span>
-<span class="prompt">$</span> <span class="cmt"># let me open 1Password…</span>
+    <section class="hero wrap" id="top" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">A connection is one word instead of a long <code>ssh</code> line.</h1>
+        <p class="lede">better-ssh is a command-line tool for managing SSH connections with an interactive interface, password management and optional encryption. Every server keeps its jump chain, port forwards, environment variables and hooks. Underneath, it drives the OpenSSH client that is already on the machine.</p>
+        <div class="actions">
+          <code class="command">uv tool install git+https://github.com/aa-blinov/better-ssh.git@v0.3.0</code>
+          <button class="button button-ghost" type="button" data-copy="uv tool install git+https://github.com/aa-blinov/better-ssh.git@v0.3.0">Copy</button>
+        </div>
+        <p class="fine">Python 3.12 or higher, uv and an OpenSSH client. Windows, macOS and Linux.</p>
+      </div>
+    </section>
+
+    <section class="section wrap" id="problem" aria-labelledby="problem-title">
+      <h2 id="problem-title">The SSH config-file arms race</h2>
+      <p>If you connect to more than a handful of servers, you've felt this. IPs live in a Notion page. Passwords live in a password manager that you manually paste into the terminal. Jump hosts get re-typed. Port forwards get forgotten between sessions. Your shell history fills up with command fragments you stitched together last time.</p>
+      <p><code>~/.ssh/config</code> helps, until you need more than ssh_config can express: a password that stays encrypted on disk, port forwards attached to the server rather than to the invocation, or a local <code>aws sso login</code> that has to run before every connect.</p>
+    </section>
+
+    <section class="section wrap" id="before" aria-labelledby="before-title">
+      <h2 id="before-title">Before and after</h2>
+      <div class="compare">
+        <div>
+          <h3>Today</h3>
+          <pre class="shell"><span class="prompt">$</span> <span class="cmt"># which server was that again?</span>
+<span class="prompt">$</span> <span class="cmt"># let me open 1Password</span>
 <span class="prompt">$</span> ssh -J bastion_ops \
     deploy@prod-db.internal \
     -p 2222 \
@@ -66,181 +62,104 @@
     -L 5432:localhost:5432
 <span class="cmt"># paste password from clipboard</span>
 <span class="cmt"># it's always a login shell for this one</span></pre>
-      </div>
-      <div class="shift-arrow" aria-hidden="true">→</div>
-      <div class="shift-col">
-        <h3>With better-ssh</h3>
-<pre class="shell"><span class="prompt">$</span> bssh prod-db
-<span class="out">Password copied to clipboard.</span>
-<span class="out">SSH: ssh -p 2222 -L 5432:localhost:5432
-  -J deploy@bastion:22
-  -i /home/u/.ssh/work_ed25519
-  deploy@prod-db.internal</span>
+        </div>
+        <div class="compare-arrow" aria-hidden="true">→</div>
+        <div>
+          <h3>With better-ssh</h3>
+          <pre class="shell"><span class="prompt">$</span> bssh prod-db
+<span class="out">Password copied to clipboard. When prompted for Password: paste from clipboard using your terminal shortcut.</span>
+<span class="out">SSH: ssh -p 2222 -L 5432:localhost:5432</span>
+<span class="out">  -J deploy@bastion:22</span>
+<span class="out">  -i /home/u/.ssh/work_ed25519</span>
+<span class="out">  deploy@prod-db.internal</span>
 <span class="cmt"># paste, done.</span></pre>
+        </div>
       </div>
-    </div>
-    <p class="shift-caption">
-      Same OpenSSH under the hood. <code>better-ssh</code> just stores what you'd
-      otherwise keep in your head.
-    </p>
-  </section>
+      <p class="fine">Same OpenSSH under the hood. better-ssh stores what you would otherwise keep in your head.</p>
+    </section>
 
-  <section class="features">
-    <h2>What you get</h2>
-    <div class="features-grid">
-      <article class="feature-card">
-        <h3>Interactive picker</h3>
-        <p>
-          Fuzzy search across names, tags, and hosts. Recent connections bubble
-          to the top. Pin the ones you hit daily.
-        </p>
-      </article>
-      <article class="feature-card">
-        <h3>Encrypted password clipboard</h3>
-        <p>
-          Optional Fernet encryption keyed to your SSH private key
-          (PBKDF2-HMAC-SHA256, per-installation salt). Copied to clipboard on
-          connect, never injected into the process list.
-        </p>
-      </article>
-      <article class="feature-card">
-        <h3>Jump-host chains baked in</h3>
-        <p>
-          <code>--jump bastion</code> once, and <code>bssh</code> rebuilds the
-          full <code>-J</code> chain on every connect. Multi-hop bastions,
-          cycle detection, and cascade cleanup on removal all handled.
-        </p>
-      </article>
-      <article class="feature-card">
-        <h3>Port forwards as server profile</h3>
-        <p>
-          <code>-L</code>, <code>-R</code>, and dynamic SOCKS
-          <code>-D</code> stored per-server. No more <kbd>↑</kbd>-hunting for
-          the forward spec you built last week.
-        </p>
-      </article>
-      <article class="feature-card">
-        <h3>Parallel command broadcast</h3>
-        <p>
-          <code>bssh exec "uptime" prod</code> runs concurrently across every
-          matched host with per-host colored output and an aggregated pass/fail
-          summary. Scales to low hundreds.
-        </p>
-      </article>
-      <article class="feature-card">
-        <h3>Pre- and post-connect hooks</h3>
-        <p>
-          Bring a VPN up before each connect. Mount <code>sshfs</code> and
-          unmount on exit. Refresh an AWS SSO token. Local shell, runs around
-          ssh itself.
-        </p>
-      </article>
-      <article class="feature-card">
-        <h3>SSH config round-trip</h3>
-        <p>
-          <code>bssh isc</code> imports your existing
-          <code>~/.ssh/config</code> via <code>ssh -G</code>.
-          <code>bssh esc</code> writes it back out as
-          <code>Host</code> blocks other tooling can read.
-        </p>
-      </article>
-      <article class="feature-card">
-        <h3>Scripts-friendly by design</h3>
-        <p>
-          Every destructive op has a non-interactive flag
-          (<code>--yes</code>, <code>--force</code>, <code>--skip</code>).
-          Exit codes match Unix convention. Output stays terminal-width friendly.
-        </p>
-      </article>
-      <article class="feature-card">
-        <h3>File transfer, batteries included</h3>
-        <p>
-          <code>bssh put</code> and <code>bssh get</code> for one-shot transfers.
-          <code>bssh sftp</code> drops into an interactive session when you need
-          to browse first. Jump chain, port, key — all inherited from the
-          server profile, nothing retyped.
-        </p>
-      </article>
-    </div>
-  </section>
+    <section class="section wrap" id="capabilities" aria-labelledby="capabilities-title">
+      <h2 id="capabilities-title">What you get</h2>
+      <ul class="rail cards">
+        <li class="card">
+          <h3>Interactive picker</h3>
+          <p>A searchable menu of your servers, ordered by pinned first, then most recently used, then most used, then name.</p>
+        </li>
+        <li class="card">
+          <h3>Encrypted password clipboard</h3>
+          <p>Optional Fernet encryption keyed to your SSH private key, with PBKDF2-HMAC-SHA256 and a random per-installation salt. The password is copied to the clipboard on connect and never reaches the command line.</p>
+        </li>
+        <li class="card">
+          <h3>Jump-host chains baked in</h3>
+          <p>Name a bastion once with <code>--jump bastion</code>, and bssh rebuilds the full <code>-J</code> chain on every connect. Cycles are refused at save time, and removing a bastion clears the servers that depend on it.</p>
+        </li>
+        <li class="card">
+          <h3>Port forwards as server profile</h3>
+          <p>Local <code>-L</code>, remote <code>-R</code> and dynamic SOCKS <code>-D</code> forwards are stored with the server and passed on every connect. No more digging through shell history for the spec you built last week.</p>
+        </li>
+        <li class="card">
+          <h3>Parallel command broadcast</h3>
+          <p><code>bssh exec "uptime" prod</code> runs the command on every matched host at once, with a per-host prefix and a summary at the end. Every matched server gets its own ssh process, which is fine up to the low hundreds of hosts.</p>
+        </li>
+        <li class="card">
+          <h3>Pre- and post-connect hooks</h3>
+          <p>Bring a VPN up before each connect, mount <code>sshfs</code> and unmount it afterwards, refresh an AWS SSO token. The commands run through your local shell, around ssh itself.</p>
+        </li>
+        <li class="card">
+          <h3>SSH config round-trip</h3>
+          <p><code>bssh isc</code> imports your existing <code>~/.ssh/config</code> through <code>ssh -G</code>. <code>bssh esc</code> writes it back out as <code>Host</code> blocks that ssh, scp and git read directly.</p>
+        </li>
+        <li class="card">
+          <h3>Scripts-friendly by design</h3>
+          <p>Every prompt has a flag, and every destructive operation has a non-interactive form: <code>--yes</code>, <code>--force</code>, <code>--skip</code>. Exit codes follow the Unix convention.</p>
+        </li>
+        <li class="card">
+          <h3>File transfer, batteries included</h3>
+          <p><code>bssh put</code> and <code>bssh get</code> for one-shot transfers, <code>bssh sftp</code> for a full interactive session. The jump chain, the port and the key come from the server profile, so nothing is retyped.</p>
+        </li>
+      </ul>
+    </section>
 
-  <section class="audience">
-    <h2>Who is this for?</h2>
-    <ul>
-      <li>Developers juggling dev / staging / prod across several clients or VPS providers</li>
-      <li>SREs managing fleets of tens to low-hundreds of hosts</li>
-      <li>Anyone whose <code>~/.ssh/config</code> is longer than their <code>~/.bashrc</code></li>
-      <li>Anyone still pasting passwords from a password manager into terminals</li>
-    </ul>
-    <p class="aside">
-      If you have three servers and your muscle memory already covers them, <code>ssh</code>
-      is still the right tool. No shame in it.
-    </p>
-  </section>
+    <section class="section wrap" id="audience" aria-labelledby="audience-title">
+      <h2 id="audience-title">Who is this for?</h2>
+      <ul>
+        <li>Developers juggling dev, staging and prod across several clients or VPS providers</li>
+        <li>SREs managing fleets of tens to low hundreds of hosts</li>
+        <li>Anyone whose <code>~/.ssh/config</code> is longer than their <code>~/.bashrc</code></li>
+        <li>Anyone still pasting passwords from a password manager into terminals</li>
+      </ul>
+      <p class="fine">If you have three servers and your muscle memory already covers them, <code>ssh</code> is still the right tool. No shame in it.</p>
+    </section>
 
-  <section class="getstarted">
-    <h2>Get started</h2>
-    <p>Install (wheel from the latest release):</p>
-    <div class="install-box">
-      <code id="installCmd2">uv tool install git+https://github.com/aa-blinov/better-ssh.git@v0.3.0</code>
-      <button class="copy-btn" data-target="installCmd2" aria-label="Copy install command">Copy</button>
-    </div>
-    <p>Import what you already have and go:</p>
-<pre class="shell"><span class="prompt">$</span> bssh isc                    <span class="cmt"># imports ~/.ssh/config</span>
-<span class="prompt">$</span> bssh                        <span class="cmt"># interactive picker</span>
-<span class="prompt">$</span> bssh prod-db                <span class="cmt"># direct connect when the query is unique</span>
-<span class="prompt">$</span> bssh exec "uptime" prod     <span class="cmt"># one command, every matching host</span></pre>
-    <p class="aside">
-      Full reference — every command, every flag, every edge case —
-      lives in the <a href="https://github.com/aa-blinov/better-ssh#readme">README</a>.
-    </p>
-  </section>
+    <section class="section wrap" id="install" aria-labelledby="install-title">
+      <h2 id="install-title">Get started</h2>
+      <p>Install the wheel from the latest release:</p>
+      <div class="actions">
+        <code class="command">uv tool install git+https://github.com/aa-blinov/better-ssh.git@v0.3.0</code>
+        <button class="button button-ghost" type="button" data-copy="uv tool install git+https://github.com/aa-blinov/better-ssh.git@v0.3.0">Copy</button>
+      </div>
+      <p>Import what you already have, then connect:</p>
+      <pre class="shell"><span class="prompt">$</span> bssh isc              <span class="cmt"># imports ~/.ssh/config</span>
+<span class="prompt">$</span> bssh                  <span class="cmt"># the picker</span>
+<span class="prompt">$</span> bssh prod-db          <span class="cmt"># connect when the match is unique</span>
+<span class="prompt">$</span> bssh exec "uptime" prod <span class="cmt"># one command, every matching host</span></pre>
+      <p class="fine">Every command, every flag and every edge case is in the <a href="https://github.com/aa-blinov/better-ssh#readme">README</a>.</p>
+    </section>
 
-  <footer class="sitefooter">
-    <div class="foot-row">
-      <span>
-        <a href="https://github.com/aa-blinov/better-ssh">github.com/aa-blinov/better-ssh</a>
-        ·
-        <a href="https://github.com/aa-blinov/better-ssh/blob/master/LICENSE">MIT</a>
-        ·
-        <a href="https://github.com/aa-blinov/better-ssh/blob/master/CHANGELOG.md">CHANGELOG</a>
-      </span>
-    </div>
-    <div class="foot-row small">
-      Open source. Beta. Windows · macOS · Linux.
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <p>better-ssh 0.3.0 (beta). MIT licensed. © 2025 Alexander Blinov.</p>
+      <nav class="footer-nav" aria-label="Project links">
+        <a href="https://github.com/aa-blinov/better-ssh">Source</a>
+        <a href="https://github.com/aa-blinov/better-ssh#readme">README</a>
+        <a href="https://github.com/aa-blinov/better-ssh/blob/master/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/aa-blinov/better-ssh/releases">Releases</a>
+      </nav>
     </div>
   </footer>
 
-  <script>
-    // Copy-to-clipboard for install boxes. Falls back to selecting the text
-    // if the async Clipboard API is unavailable (file://, very old browsers).
-    document.querySelectorAll('.copy-btn').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        var target = document.getElementById(btn.dataset.target);
-        if (!target) return;
-        var text = target.textContent;
-        var done = function() {
-          var original = btn.textContent;
-          btn.textContent = 'Copied';
-          btn.classList.add('copied');
-          setTimeout(function() {
-            btn.textContent = original;
-            btn.classList.remove('copied');
-          }, 1400);
-        };
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text).then(done, function() {
-            /* ignore */
-          });
-        } else {
-          var range = document.createRange();
-          range.selectNode(target);
-          window.getSelection().removeAllRanges();
-          window.getSelection().addRange(range);
-          try { document.execCommand('copy'); done(); } catch (e) { /* ignore */ }
-        }
-      });
-    });
-  </script>
+  <script src="site.js" defer></script>
 </body>
 </html>
