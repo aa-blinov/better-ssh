@@ -10,6 +10,10 @@
 (function () {
   'use strict';
 
+  // The reveal rules are scoped to this class, so a page whose script did
+  // not load shows everything. It goes on before the page paints.
+  document.documentElement.classList.add('js');
+
   // The copy button. A command line that is hard to copy is a command line
   // nobody runs.
   function setUpCopyButtons() {
@@ -19,7 +23,7 @@
         var text = button.getAttribute('data-copy');
         var done = function () {
           var label = button.textContent;
-          button.textContent = 'Copied';
+          button.textContent = button.getAttribute('data-copy-label') || 'Copied';
           button.setAttribute('aria-live', 'polite');
           window.setTimeout(function () {
             button.textContent = label;
